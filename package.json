@@ -2,7 +2,7 @@
   "name": "daily-puzzle-platform",
   "private": true,
   "version": "0.0.1",
-  "packageManager": "pnpm@10",
+  "packageManager": "pnpm@11.1.3",
   "scripts": {
     "dev": "echo \"Root workspace\""
   }

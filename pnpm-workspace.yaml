@@ -2,3 +2,7 @@ packages:
   - "apps/*"
   - "packages/*"
   - "games/*"
+allowBuilds:
+  msw: true
+  sharp: false
+  unrs-resolver: false
