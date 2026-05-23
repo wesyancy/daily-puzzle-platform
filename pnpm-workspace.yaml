@@ -3,6 +3,7 @@ packages:
   - "packages/*"
   - "games/*"
 allowBuilds:
+  esbuild: true
   msw: true
   sharp: false
   unrs-resolver: false

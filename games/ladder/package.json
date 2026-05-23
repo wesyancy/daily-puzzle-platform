@@ -1,0 +1,8 @@
+{
+  "name": "@repo/ladder",
+  "private": true,
+  "version": "0.0.1",
+  "dependencies": {
+    "@repo/dictionary": "workspace:*"
+  }
+}
