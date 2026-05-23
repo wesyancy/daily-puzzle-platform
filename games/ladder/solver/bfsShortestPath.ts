@@ -1,53 +1,46 @@
-import { getNeighbors } from "@repo/dictionary";
+import { getNeighbors } from '@repo/dictionary';
 
 export function bfsShortestPath(
-  start: string,
-  target: string,
-  wordSet: Set<string>
+    start: string,
+    target: string,
+    wordSet: Set<string>,
 ): string[] | null {
-  if (start === target) {
-    return [start];
-  }
-
-  const queue: string[][] = [[start]];
-
-  const visited = new Set<string>();
-  visited.add(start);
-
-  while (queue.length > 0) {
-    const currentPath = queue.shift();
-
-    if (!currentPath) {
-      continue;
+    if (start === target) {
+        return [start];
     }
 
-    const currentWord =
-      currentPath[currentPath.length - 1];
+    const queue: string[][] = [[start]];
 
-    const neighbors = getNeighbors(
-      currentWord,
-      wordSet
-    );
+    const visited = new Set<string>();
+    visited.add(start);
 
-    for (const neighbor of neighbors) {
-      if (visited.has(neighbor)) {
-        continue;
-      }
+    while (queue.length > 0) {
+        const currentPath = queue.shift();
 
-      const nextPath = [
-        ...currentPath,
-        neighbor,
-      ];
+        if (!currentPath) {
+            continue;
+        }
 
-      if (neighbor === target) {
-        return nextPath;
-      }
+        const currentWord = currentPath[currentPath.length - 1];
 
-      visited.add(neighbor);
+        const neighbors = getNeighbors(currentWord, wordSet);
 
-      queue.push(nextPath);
+        for (const neighbor of neighbors) {
+            if (visited.has(neighbor)) {
+                continue;
+            }
+
+            const nextPath = [...currentPath, neighbor];
+
+            if (neighbor === target) {
+                return nextPath;
+            }
+
+            visited.add(neighbor);
+
+            queue.push(nextPath);
+        }
     }
-  }
 
-  return null;
+    return null;
 }

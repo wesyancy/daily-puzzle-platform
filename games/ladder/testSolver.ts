@@ -1,25 +1,20 @@
 import {
-  loadDictionary,
-  filterWords,
-  filterBannedWords,
-  createWordSet,
-} from "@repo/dictionary";
+    loadDictionary,
+    filterWords,
+    filterBannedWords,
+    createWordSet,
+} from '@repo/dictionary';
 
-import { bfsShortestPath } from "./solver/bfsShortestPath";
+import { bfsShortestPath } from './solver/bfsShortestPath';
 
 const rawWords = loadDictionary();
 
 const filteredWords = filterWords(rawWords);
 
-const cleanedWords =
-  filterBannedWords(filteredWords);
+const cleanedWords = filterBannedWords(filteredWords);
 
 const wordSet = createWordSet(cleanedWords);
 
-const result = bfsShortestPath(
-  "COLD",
-  "WARM",
-  wordSet
-);
+const result = bfsShortestPath('COLD', 'WARM', wordSet);
 
 console.log(result);

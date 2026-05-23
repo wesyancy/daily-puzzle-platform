@@ -1,25 +1,26 @@
 import {
-  loadDictionary,
-  filterWords,
-  filterBannedWords,
-  createWordSet,
-} from "@repo/dictionary";
+    loadDictionary,
+    filterWords,
+    filterBannedWords,
+    createWordSet,
+    loadCommonWords,
+    filterCommonWords,
+} from '@repo/dictionary';
 
-import { isValidMove } from "./validation/isValidMove";
+import { isValidMove } from './validation/isValidMove';
 
 const rawWords = loadDictionary();
 
 const filteredWords = filterWords(rawWords);
 
-const cleanedWords =
-  filterBannedWords(filteredWords);
+const cleanedWords = filterBannedWords(filteredWords);
 
-const wordSet = createWordSet(cleanedWords);
+const commonWords = loadCommonWords();
 
-console.log(
-  isValidMove("COLD", "CORD", wordSet)
-);
+const finalWords = filterCommonWords(cleanedWords, commonWords);
 
-console.log(
-  isValidMove("COLD", "WARM", wordSet)
-);
+const wordSet = createWordSet(finalWords);
+
+console.log(isValidMove('COLD', 'CORD', wordSet));
+
+console.log(isValidMove('COLD', 'WARM', wordSet));
