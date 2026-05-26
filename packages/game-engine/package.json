@@ -1,0 +1,10 @@
+{
+    "name": "@repo/game-engine",
+    "version": "0.0.1",
+    "private": true,
+    "main": "./src/index.ts",
+    "dependencies": {
+        "@repo/game-engine": "workspace:*",
+        "@repo/dictionary": "workspace:*"
+    }
+}

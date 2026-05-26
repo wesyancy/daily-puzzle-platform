@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.0.1",
   "dependencies": {
+    "@repo/game-engine": "workspace:*",
     "@repo/dictionary": "workspace:*"
   }
 }

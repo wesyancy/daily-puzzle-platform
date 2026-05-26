@@ -5,7 +5,7 @@ import {
     createWordSet,
 } from '@repo/dictionary';
 
-import { bfsShortestPath } from './solver/bfsShortestPath';
+import { bfsShortestPath } from '@repo/game-engine';
 
 const rawWords = loadDictionary();
 

@@ -9,7 +9,7 @@ import {
 
 import { calculateLetterSimilarity } from './calculateLetterSimilarity';
 
-import { bfsShortestPath } from '../../solver/bfsShortestPath';
+import { bfsShortestPath } from '@repo/game-engine';
 
 function randomItem<T>(items: T[]): T {
     return items[Math.floor(Math.random() * items.length)];

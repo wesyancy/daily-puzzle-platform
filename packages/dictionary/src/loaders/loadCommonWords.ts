@@ -2,7 +2,10 @@ import fs from 'fs';
 import path from 'path';
 
 export function loadCommonWords(): Set<string> {
-    const filePath = path.join(__dirname, '../data/commonWords.txt');
+    const filePath = path.join(
+        process.cwd(),
+        '../../packages/dictionary/src/data/commonWords.txt',
+    );
 
     const contents = fs.readFileSync(filePath, 'utf-8');
 

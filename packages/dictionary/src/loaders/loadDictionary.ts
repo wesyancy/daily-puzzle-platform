@@ -2,7 +2,10 @@ import fs from 'fs';
 import path from 'path';
 
 export function loadDictionary(): string[] {
-    const filePath = path.join(__dirname, '../data/enable1.txt');
+    const filePath = path.join(
+        process.cwd(),
+        '../../packages/dictionary/src/data/enable1.txt',
+    );
 
     const contents = fs.readFileSync(filePath, 'utf-8');
 

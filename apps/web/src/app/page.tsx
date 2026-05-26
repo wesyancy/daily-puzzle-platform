@@ -1,9 +1,7 @@
-import { Button } from '@/components/ui/button';
+import { redirect } from 'next/navigation';
 
+// MVP: only one game exists, route straight to it.
+// When more games are added, replace this with a proper landing page.
 export default function HomePage() {
-    return (
-        <main className="flex min-h-screen items-center justify-center">
-            <Button>Play Daily Puzzle</Button>
-        </main>
-    );
+    redirect('/game');
 }

@@ -5,7 +5,7 @@ import {
     createWordSet,
 } from '@repo/dictionary';
 
-import { calculatePuzzleMetrics } from './logic/calculatePuzzleMetrics';
+import { calculatePuzzleMetrics } from '@repo/game-engine';
 
 const rawWords = loadDictionary();
 

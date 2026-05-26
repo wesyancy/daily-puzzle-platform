@@ -7,7 +7,7 @@ import {
     filterCommonWords,
 } from '@repo/dictionary';
 
-import { isValidMove } from './validation/isValidMove';
+import { isValidMove } from '@repo/game-engine';
 
 const rawWords = loadDictionary();
 
