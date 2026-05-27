@@ -62,6 +62,19 @@ export default function GameClient({
     // Hints popup
     const [showHints, setShowHints] = useState(false);
 
+    // How to play modal — auto-opens on first visit
+    const [showInstructions, setShowInstructions] = useState(false);
+    useEffect(() => {
+        if (!localStorage.getItem('ladder-seen-instructions')) {
+            setShowInstructions(true);
+        }
+    }, []);
+
+    function closeInstructions() {
+        localStorage.setItem('ladder-seen-instructions', '1');
+        setShowInstructions(false);
+    }
+
     const currentWord = moves[moves.length - 1];
     const solved = currentWord === puzzle.target;
     const validNextWords = [...(puzzle.neighborGraph[currentWord] ?? [])].sort();
@@ -181,6 +194,69 @@ export default function GameClient({
 
     return (
         <>
+            {/* ── How to play modal ── */}
+            {showInstructions && (
+                <div
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+                    onClick={closeInstructions}>
+                    <div
+                        className="bg-[var(--background)] border rounded-lg p-6 max-w-sm w-full mx-4 flex flex-col gap-5"
+                        onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-between">
+                            <h2 className="text-lg font-bold">How to Play</h2>
+                            <button
+                                onClick={closeInstructions}
+                                className="opacity-50 hover:opacity-100 text-lg leading-none px-1">
+                                ✕
+                            </button>
+                        </div>
+
+                        <div className="flex flex-col gap-1">
+                            <p className="text-sm font-semibold">Objective</p>
+                            <p className="text-sm opacity-70">
+                                Transform the start word into the target word,
+                                one letter at a time. Every step must be a valid
+                                English word.
+                            </p>
+                        </div>
+
+                        <div className="flex flex-col gap-2">
+                            <p className="text-sm font-semibold">Rules</p>
+                            <ul className="text-sm opacity-70 flex flex-col gap-1 list-disc list-inside">
+                                <li>Change exactly one letter per move</li>
+                                <li>Every word must be in the dictionary</li>
+                                <li>Reach the target in as few moves as possible</li>
+                            </ul>
+                        </div>
+
+                        <div className="flex flex-col gap-1 p-3 rounded-md border font-mono text-sm">
+                            <span>COLD</span>
+                            <span className="opacity-50">↓ change O→A</span>
+                            <span>CALD... invalid!</span>
+                            <span className="opacity-50">↓ change C→B</span>
+                            <span>BOLD</span>
+                            <span className="opacity-50">↓ change B→W</span>
+                            <span>WOLD → ...</span>
+                        </div>
+
+                        <div className="flex flex-col gap-1">
+                            <p className="text-sm font-semibold">Feedback</p>
+                            <p className="text-sm opacity-70">
+                                Use 👍 / 👎 to rate the puzzle after playing.
+                                If a word feels missing or wrong, use the
+                                Dictionary feedback section at the bottom.
+                            </p>
+                        </div>
+
+                        <button
+                            onClick={closeInstructions}
+                            className="border rounded px-4 py-2 text-sm font-semibold w-full">
+                            Let&apos;s play →
+                        </button>
+                    </div>
+                </div>
+            )}
+
             {/* ── Hints overlay ── */}
             {showHints && (
                 <div
@@ -231,7 +307,15 @@ export default function GameClient({
                 {/* Header */}
                 <div className="flex items-center justify-between">
                     <h1 className="text-4xl font-bold">Ladder</h1>
-                    <ThemeToggle />
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => setShowInstructions(true)}
+                            className="border rounded px-2.5 py-1.5 text-sm opacity-50 hover:opacity-100 transition-opacity"
+                            title="How to play">
+                            ?
+                        </button>
+                        <ThemeToggle />
+                    </div>
                 </div>
 
                 <div className="text-xl">
