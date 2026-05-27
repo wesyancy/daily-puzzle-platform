@@ -30,12 +30,7 @@ const GOOD_REASONS = [
     'Felt clever',
 ];
 
-const BAD_REASONS = [
-    'Too easy',
-    'Too hard',
-    'Obscure words',
-    'Felt random',
-];
+const BAD_REASONS = ['Too easy', 'Too hard', 'Obscure words', 'Felt random'];
 
 export default function GameClient({
     initialPuzzle,
@@ -77,7 +72,9 @@ export default function GameClient({
 
     const currentWord = moves[moves.length - 1];
     const solved = currentWord === puzzle.target;
-    const validNextWords = [...(puzzle.neighborGraph[currentWord] ?? [])].sort();
+    const validNextWords = [
+        ...(puzzle.neighborGraph[currentWord] ?? []),
+    ].sort();
     const flaggableWords = Array.from(new Set([puzzle.start, puzzle.target]));
 
     // Clean up toast timer on unmount
@@ -224,7 +221,9 @@ export default function GameClient({
                             <p className="text-sm font-semibold">Rules</p>
                             <ul className="text-sm opacity-70 flex flex-col gap-1 list-disc list-inside">
                                 <li>Change exactly one letter per move</li>
-                                <li>Reach the target in as few moves as possible</li>
+                                <li>
+                                    Reach the target in as few moves as possible
+                                </li>
                             </ul>
                         </div>
 
@@ -235,7 +234,7 @@ export default function GameClient({
                             <span>CORD</span>
                             <span className="opacity-50">↓ change C→W</span>
                             <span>WORD</span>
-                            <span className="opacity-50">↓ change O→R</span>
+                            <span className="opacity-50">↓ change O→A</span>
                             <span>WARD</span>
                             <span className="opacity-50">↓ change D→M</span>
                             <span>WARM</span>
@@ -244,12 +243,12 @@ export default function GameClient({
                         <div className="flex flex-col gap-1">
                             <p className="text-sm font-semibold">Feedback</p>
                             <p className="text-sm opacity-70">
-                                Use 👍 / 👎 to rate the puzzle after playing.
-                                If a word feels missing or wrong, use the
-                                Dictionary feedback section at the bottom. 
+                                Please use 👍 / 👎 to rate the puzzle after playing. If
+                                a word feels missing or wrong, use the
+                                Dictionary feedback section at the bottom.
                                 <br></br>
                                 <br></br>
-                                You may press the New Puzzle button to play 
+                                You may press the New Puzzle button to play
                                 again (alpha only).
                             </p>
                         </div>
@@ -318,14 +317,30 @@ export default function GameClient({
                             onClick={() => setShowInstructions(true)}
                             className="border rounded px-2.5 py-1.5 text-sm opacity-70 hover:opacity-100 transition-opacity"
                             title="How to play">
-                            ?
+                            How to Play
                         </button>
                         <ThemeToggle />
                     </div>
                 </div>
 
-                <div className="text-xl">
-                    {puzzle.start} → {puzzle.target}
+                <div className="flex items-center justify-center gap-6">
+                    <div className="flex flex-col items-center gap-1">
+                        <span className="text-xs uppercase tracking-widest opacity-40">
+                            Start
+                        </span>
+                        <span className="text-xl font-mono font-semibold">
+                            {puzzle.start}
+                        </span>
+                    </div>
+                    <span className="text-lg opacity-30">→</span>
+                    <div className="flex flex-col items-center gap-1">
+                        <span className="text-xs uppercase tracking-widest opacity-40">
+                            Target
+                        </span>
+                        <span className="text-xl font-mono font-semibold">
+                            {puzzle.target}
+                        </span>
+                    </div>
                 </div>
 
                 <div className="text-sm opacity-60">
@@ -366,14 +381,12 @@ export default function GameClient({
                             onClick={() => setShowHints((v) => !v)}
                             className="border rounded px-3 py-2 text-sm opacity-60 hover:opacity-100 transition-opacity"
                             title="Show valid moves (research mode)">
-                            💡
+                            Hint
                         </button>
                     </div>
                 )}
 
-                {message && (
-                    <div className="text-sm opacity-80">{message}</div>
-                )}
+                {message && <div className="text-sm opacity-80">{message}</div>}
 
                 {/* ── Quality feedback ── */}
                 <div className="border-t pt-4 flex flex-col gap-3">
@@ -450,12 +463,12 @@ export default function GameClient({
                             <button
                                 onClick={() => setWordReportStage('missing')}
                                 className="border rounded px-3 py-1.5 text-sm">
-                                + Word missing from game
+                                + submit a missing word +
                             </button>
                             <button
                                 onClick={() => setWordReportStage('bad')}
                                 className="border rounded px-3 py-1.5 text-sm">
-                                − Word shouldn&apos;t be in game
+                                − help remove a word −
                             </button>
                         </div>
                     )}
@@ -511,9 +524,7 @@ export default function GameClient({
                                     </button>
                                 ))}
                                 <button
-                                    onClick={() =>
-                                        setWordReportStage('idle')
-                                    }
+                                    onClick={() => setWordReportStage('idle')}
                                     className="border rounded px-3 py-1.5 text-sm opacity-50 hover:opacity-100">
                                     ✕ Cancel
                                 </button>
