@@ -1,0 +1,15 @@
+# Words that should never appear as a puzzle start or target.
+# These are either exclusively proper nouns (no meaningful standalone
+# English definition) or clearly inappropriate as puzzle endpoints.
+#
+# Note: words that are ALSO common English words (NICK, WADE, DALE, BUCK,
+# HART, etc.) are NOT listed here — block the specific pair instead.
+
+# Proper nouns with no meaningful standalone definition
+BACH
+CARL
+CORY
+LARS
+
+# Drug / inappropriate
+METH

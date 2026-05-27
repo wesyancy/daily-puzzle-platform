@@ -1,0 +1,31 @@
+# Specific word pairs that should never appear as puzzles.
+# Use this for pairs that are inappropriate as a combination even if
+# both individual words pass all other checks.
+# Format: WORD1,WORD2 (order matters — also add reverse if needed)
+
+# Violence / inappropriate combinations
+GANG,RAPE
+RAGE,KILL
+GUTS,GORE
+HATE,MAIL
+SONS,DIED
+
+# Political figures (would seem partisan or like a joke)
+BUSH,GORE
+
+# Drug references
+METH,HANK
+METH,LABS
+
+# Proper noun pairs (both words are primarily names)
+BUCK,MIKE
+CARL,BACH
+CORY,WADE
+GAGE,HOWE
+LARS,LONE
+LOWE,NICK
+MATT,KICK
+MATT,NICK
+NICK,HANK
+RICK,CARL
+RICK,WARE
