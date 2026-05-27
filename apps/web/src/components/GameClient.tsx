@@ -224,19 +224,21 @@ export default function GameClient({
                             <p className="text-sm font-semibold">Rules</p>
                             <ul className="text-sm opacity-70 flex flex-col gap-1 list-disc list-inside">
                                 <li>Change exactly one letter per move</li>
-                                <li>Every word must be in the dictionary</li>
                                 <li>Reach the target in as few moves as possible</li>
                             </ul>
                         </div>
 
                         <div className="flex flex-col gap-1 p-3 rounded-md border font-mono text-sm">
+                            <span>Ex. COLD → WARM</span>
                             <span>COLD</span>
-                            <span className="opacity-50">↓ change O→A</span>
-                            <span>CALD... invalid!</span>
-                            <span className="opacity-50">↓ change C→B</span>
-                            <span>BOLD</span>
-                            <span className="opacity-50">↓ change B→W</span>
-                            <span>WOLD → ...</span>
+                            <span className="opacity-50">↓ change L→R</span>
+                            <span>CORD</span>
+                            <span className="opacity-50">↓ change C→W</span>
+                            <span>WORD</span>
+                            <span className="opacity-50">↓ change O→R</span>
+                            <span>WARD</span>
+                            <span className="opacity-50">↓ change D→M</span>
+                            <span>WARM</span>
                         </div>
 
                         <div className="flex flex-col gap-1">
@@ -244,7 +246,11 @@ export default function GameClient({
                             <p className="text-sm opacity-70">
                                 Use 👍 / 👎 to rate the puzzle after playing.
                                 If a word feels missing or wrong, use the
-                                Dictionary feedback section at the bottom.
+                                Dictionary feedback section at the bottom. 
+                                <br></br>
+                                <br></br>
+                                You may press the New Puzzle button to play 
+                                again (alpha only).
                             </p>
                         </div>
 
@@ -310,7 +316,7 @@ export default function GameClient({
                     <div className="flex items-center gap-2">
                         <button
                             onClick={() => setShowInstructions(true)}
-                            className="border rounded px-2.5 py-1.5 text-sm opacity-50 hover:opacity-100 transition-opacity"
+                            className="border rounded px-2.5 py-1.5 text-sm opacity-70 hover:opacity-100 transition-opacity"
                             title="How to play">
                             ?
                         </button>
@@ -371,6 +377,9 @@ export default function GameClient({
 
                 {/* ── Quality feedback ── */}
                 <div className="border-t pt-4 flex flex-col gap-3">
+                    <p className="text-xs opacity-50 uppercase tracking-wide">
+                        Puzzle feedback
+                    </p>
                     {feedback.stage === 'idle' && (
                         <div className="flex gap-2 flex-wrap">
                             <button
