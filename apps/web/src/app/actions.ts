@@ -1,5 +1,7 @@
 'use server';
 
+import { supabase } from '@/lib/supabase';
+
 export interface FeedbackPayload {
     start: string;
     target: string;
@@ -20,22 +22,31 @@ export interface WordReportPayload {
     timestamp: string;
 }
 
-/**
- * Receives puzzle quality feedback (good/bad + reason).
- * TODO: wire to Supabase once the database is set up.
- */
 export async function submitFeedback(payload: FeedbackPayload): Promise<void> {
-    console.log('[feedback]', payload);
+    const { error } = await supabase.from('puzzle_feedback').insert({
+        start: payload.start,
+        target: payload.target,
+        optimal_path_length: payload.optimalPathLength,
+        moves_taken: payload.movesTaken,
+        solved: payload.solved,
+        rating: payload.rating,
+        reason: payload.reason,
+    });
+
+    if (error) {
+        console.error('[feedback] Supabase insert failed:', error.message);
+    }
 }
 
-/**
- * Receives a word report:
- *   kind=missing → player thinks this word should be in the dictionary
- *   kind=bad     → player thinks this word shouldn't appear in puzzles
- * TODO: wire to Supabase once the database is set up.
- */
-export async function submitWordReport(
-    payload: WordReportPayload,
-): Promise<void> {
-    console.log('[word-report]', payload);
+export async function submitWordReport(payload: WordReportPayload): Promise<void> {
+    const { error } = await supabase.from('word_reports').insert({
+        word: payload.word,
+        kind: payload.kind,
+        start: payload.start,
+        target: payload.target,
+    });
+
+    if (error) {
+        console.error('[word-report] Supabase insert failed:', error.message);
+    }
 }
