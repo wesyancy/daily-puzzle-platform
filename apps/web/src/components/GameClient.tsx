@@ -311,7 +311,10 @@ export default function GameClient({
             <main className="w-full max-w-xl mx-auto min-h-screen p-8 flex flex-col gap-6">
                 {/* Header */}
                 <div className="flex items-center justify-between">
-                    <h1 className="text-4xl font-bold">Ladder</h1>
+                    <div className="flex flex-col gap-0.5">
+                        <h1 className="text-4xl font-bold">Steple</h1>
+                        <p className="text-xs opacity-40 tracking-wide">a daily word ladder game</p>
+                    </div>
                     <div className="flex items-center gap-2">
                         <button
                             onClick={() => setShowInstructions(true)}
