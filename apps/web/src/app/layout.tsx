@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
     title: 'Daily Puzzle Platform',
-    description: 'Daily competitive word games',
+    description: 'Daily word and logic games.',
 };
 
 export default function RootLayout({
