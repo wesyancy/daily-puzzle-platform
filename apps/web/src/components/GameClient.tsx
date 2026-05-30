@@ -56,9 +56,15 @@ export default function GameClient({
 
     // Hints popup
     const [showHints, setShowHints] = useState(false);
+    const [hintsUsed, setHintsUsed] = useState(0);
 
     // How to play modal — auto-opens on first visit
     const [showInstructions, setShowInstructions] = useState(false);
+
+    // Feedback reminder modal — triggers after first word submission
+    const [showFeedbackReminder, setShowFeedbackReminder] = useState(false);
+    const feedbackReminderShown = useRef(false);
+
     useEffect(() => {
         if (!localStorage.getItem('ladder-seen-instructions')) {
             setShowInstructions(true);
@@ -92,13 +98,27 @@ export default function GameClient({
 
     // ── Gameplay ──────────────────────────────────────────────────────────────
 
+    function letterDiff(a: string, b: string): number {
+        if (a.length !== b.length) return Infinity;
+        let diffs = 0;
+        for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) diffs++;
+        return diffs;
+    }
+
     function submitMove(word?: string) {
         const guess = (word ?? input).trim().toUpperCase();
         if (!guess) return;
 
         const validNeighbors = puzzle.neighborGraph[currentWord] ?? [];
         if (!validNeighbors.includes(guess)) {
-            setMessage('Invalid move.');
+            const diff = letterDiff(currentWord, guess);
+            if (diff === 0) {
+                setMessage("That's the word you're already on.");
+            } else if (diff !== 1) {
+                setMessage(`One-letter rule: that changes ${diff === Infinity ? 'the wrong number of' : diff} letters.`);
+            } else {
+                setMessage("Not in the word list.");
+            }
             return;
         }
 
@@ -106,6 +126,11 @@ export default function GameClient({
         setMoves(nextMoves);
         setInput('');
         setShowHints(false);
+
+        if (!feedbackReminderShown.current) {
+            feedbackReminderShown.current = true;
+            setShowFeedbackReminder(true);
+        }
 
         if (guess === puzzle.target) {
             setMessage(`Solved in ${nextMoves.length - 1} moves!`);
@@ -208,55 +233,72 @@ export default function GameClient({
                             </button>
                         </div>
 
-                        <div className="flex flex-col gap-1">
-                            <p className="text-sm font-semibold">Objective</p>
-                            <p className="text-sm opacity-70">
-                                Transform the start word into the target word,
-                                one letter at a time. Every step must be a valid
-                                English word.
-                            </p>
-                        </div>
+                        <p className="text-sm opacity-70">
+                            Get from the start word to the target word — one letter at a time.
+                        </p>
 
-                        <div className="flex flex-col gap-2">
-                            <p className="text-sm font-semibold">Rules</p>
-                            <ul className="text-sm opacity-70 flex flex-col gap-1 list-disc list-inside">
-                                <li>Change exactly one letter per move</li>
-                                <li>
-                                    Reach the target in as few moves as possible
-                                </li>
-                            </ul>
+                        <div className="flex flex-col gap-1">
+                            <p className="text-sm font-semibold">The one-letter rule</p>
+                            <p className="text-sm opacity-70">
+                                Every move, change exactly one letter. The result must be a real word. That&apos;s it.
+                            </p>
                         </div>
 
                         <div className="flex flex-col gap-1 p-3 rounded-md border font-mono text-sm">
-                            <span>Ex. COLD → WARM</span>
+                            <span className="opacity-40 text-xs mb-1">COLD → WARM</span>
                             <span>COLD</span>
-                            <span className="opacity-50">↓ change L→R</span>
+                            <span className="opacity-40 text-xs">change L→R</span>
                             <span>CORD</span>
-                            <span className="opacity-50">↓ change C→W</span>
+                            <span className="opacity-40 text-xs">change C→W</span>
                             <span>WORD</span>
-                            <span className="opacity-50">↓ change O→A</span>
+                            <span className="opacity-40 text-xs">change O→A</span>
                             <span>WARD</span>
-                            <span className="opacity-50">↓ change D→M</span>
-                            <span>WARM</span>
+                            <span className="opacity-40 text-xs">change D→M</span>
+                            <span>WARM ✓</span>
                         </div>
 
-                        <div className="flex flex-col gap-1">
-                            <p className="text-sm font-semibold">Feedback</p>
-                            <p className="text-sm opacity-70">
-                                Please use 👍 / 👎 to rate the puzzle after playing. If
-                                a word feels missing or wrong, use the
-                                Dictionary feedback section at the bottom.
-                                <br></br>
-                                <br></br>
-                                You may press the New Puzzle button to play
-                                again (alpha only).
-                            </p>
-                        </div>
+                        <p className="text-sm opacity-70">
+                            Fewer moves is better — try to match the optimal path.
+                        </p>
 
                         <button
                             onClick={closeInstructions}
                             className="border rounded px-4 py-2 text-sm font-semibold w-full">
                             Let&apos;s play →
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* ── Feedback reminder modal ── */}
+            {showFeedbackReminder && (
+                <div
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+                    onClick={() => setShowFeedbackReminder(false)}>
+                    <div
+                        className="bg-[var(--background)] border rounded-lg p-6 max-w-sm w-full mx-4 flex flex-col gap-4"
+                        onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-between">
+                            <h2 className="text-lg font-bold">Every puzzle counts</h2>
+                            <button
+                                onClick={() => setShowFeedbackReminder(false)}
+                                className="opacity-50 hover:opacity-100 text-lg leading-none px-1">
+                                ✕
+                            </button>
+                        </div>
+
+                        <ul className="text-sm opacity-70 flex flex-col gap-2">
+                            <li>👍 👎 &nbsp;Rate the puzzle — good or bad</li>
+                            <li>🔤 &nbsp;Flag missing or wrong words</li>
+                            <li>↻ &nbsp;Skip if it&apos;s not working for you</li>
+                        </ul>
+
+                        <p className="text-xs opacity-40">Your feedback shapes the game. Do it for every puzzle.</p>
+
+                        <button
+                            onClick={() => setShowFeedbackReminder(false)}
+                            className="border rounded px-4 py-2 text-sm font-semibold w-full">
+                            Got it
                         </button>
                     </div>
                 </div>
@@ -308,7 +350,7 @@ export default function GameClient({
                 </div>
             )}
 
-            <main className="w-full max-w-xl mx-auto min-h-screen p-8 flex flex-col gap-6">
+            <main className="w-full max-w-xl mx-auto min-h-screen px-4 py-6 sm:p-8 flex flex-col gap-6">
                 {/* Header */}
                 <div className="flex items-center justify-between">
                     <div className="flex flex-col gap-0.5">
@@ -346,8 +388,8 @@ export default function GameClient({
                     </div>
                 </div>
 
-                <div className="text-sm opacity-60">
-                    Optimal: {puzzle.optimalPath.length - 1} moves
+                <div className="text-sm opacity-60 text-center">
+                    Shortest path: {puzzle.optimalPath.length - 1} moves
                 </div>
 
                 {/* Move chain */}
@@ -355,7 +397,7 @@ export default function GameClient({
                     {moves.map((move, index) => (
                         <div
                             key={index}
-                            className="border rounded px-4 py-2 text-lg font-mono">
+                            className="border-2 border-blue-500 rounded px-4 py-2 text-lg font-mono">
                             {move}
                         </div>
                     ))}
@@ -363,28 +405,26 @@ export default function GameClient({
 
                 {/* Input row */}
                 {!solved && (
-                    <div className="flex gap-2">
+                    <div className="flex flex-col gap-2 sm:flex-row">
                         <input
                             value={input}
                             onChange={(e) => setInput(e.target.value)}
                             onKeyDown={handleKeyDown}
-                            className="border rounded px-3 py-2 flex-1 bg-transparent font-mono uppercase"
+                            className="border rounded px-4 py-2 w-full sm:flex-1 sm:min-w-0 bg-transparent font-mono uppercase text-lg"
                             placeholder="Next word"
                             maxLength={puzzle.start.length}
                             autoFocus
                         />
-
                         <button
                             onClick={() => submitMove()}
-                            className="border rounded px-4 py-2">
+                            className="border rounded px-4 py-2 w-full sm:w-auto sm:shrink-0">
                             Submit
                         </button>
-
                         <button
-                            onClick={() => setShowHints((v) => !v)}
-                            className="border rounded px-3 py-2 text-sm opacity-60 hover:opacity-100 transition-opacity"
-                            title="Show valid moves (research mode)">
-                            Hint
+                            onClick={() => { setShowHints((v) => !v); setHintsUsed((n) => Math.min(n + 1, 2)); }}
+                            disabled={hintsUsed >= 2 && !showHints}
+                            className="border rounded px-4 py-2 w-full sm:w-auto sm:shrink-0 text-sm opacity-60 hover:opacity-100 transition-opacity disabled:opacity-25 disabled:cursor-not-allowed">
+                            Hint ×{Math.max(0, 2 - hintsUsed)}
                         </button>
                     </div>
                 )}
@@ -397,20 +437,20 @@ export default function GameClient({
                         Puzzle feedback
                     </p>
                     {feedback.stage === 'idle' && (
-                        <div className="flex gap-2 flex-wrap">
+                        <div className="flex flex-col gap-2 sm:flex-row">
                             <button
                                 onClick={() => handleFeedback('good')}
-                                className="border rounded px-3 py-1.5 text-sm">
+                                className="border-2 border-green-500 rounded px-3 py-1.5 text-sm w-full sm:flex-1">
                                 👍 Good puzzle
                             </button>
                             <button
                                 onClick={() => handleFeedback('bad')}
-                                className="border rounded px-3 py-1.5 text-sm">
+                                className="border-2 border-red-500 rounded px-3 py-1.5 text-sm w-full sm:flex-1">
                                 👎 Bad puzzle
                             </button>
                             <button
                                 onClick={generateAnother}
-                                className="border rounded px-3 py-1.5 text-sm">
+                                className="border-2 border-yellow-400 rounded px-3 py-1.5 text-sm w-full sm:flex-1">
                                 ↻ New puzzle
                             </button>
                         </div>
@@ -443,7 +483,7 @@ export default function GameClient({
                             </p>
                             <button
                                 onClick={generateAnother}
-                                className="border rounded px-3 py-1.5 text-sm w-fit">
+                                className="border-2 border-yellow-400 rounded px-3 py-1.5 text-sm w-full sm:w-fit">
                                 ↻ New puzzle
                             </button>
                         </div>
@@ -462,15 +502,15 @@ export default function GameClient({
                     )}
 
                     {wordReportStage === 'idle' && (
-                        <div className="flex gap-2 flex-wrap">
+                        <div className="flex flex-col gap-2 sm:flex-row">
                             <button
                                 onClick={() => setWordReportStage('missing')}
-                                className="border rounded px-3 py-1.5 text-sm">
+                                className="border rounded px-3 py-1.5 text-sm w-full sm:flex-1">
                                 + submit a missing word +
                             </button>
                             <button
                                 onClick={() => setWordReportStage('bad')}
-                                className="border rounded px-3 py-1.5 text-sm">
+                                className="border rounded px-3 py-1.5 text-sm w-full sm:flex-1">
                                 − help remove a word −
                             </button>
                         </div>
