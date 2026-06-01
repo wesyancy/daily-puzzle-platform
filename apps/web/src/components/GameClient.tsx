@@ -32,6 +32,14 @@ const GOOD_REASONS = [
 
 const BAD_REASONS = ['Too easy', 'Too hard', 'Obscure words', 'Felt random'];
 
+const STORAGE_KEY = 'ladder-puzzle-state';
+
+type SavedState = {
+    puzzle: Puzzle;
+    moves: string[];
+    hintsUsed: number;
+};
+
 export default function GameClient({
     initialPuzzle,
 }: {
@@ -39,10 +47,13 @@ export default function GameClient({
 }) {
     const router = useRouter();
 
-    const [puzzle] = useState(initialPuzzle);
-    const [moves, setMoves] = useState<string[]>([puzzle.start]);
+    const [puzzle, setPuzzle] = useState<Puzzle>(initialPuzzle);
+    const [moves, setMoves] = useState<string[]>([initialPuzzle.start]);
     const [input, setInput] = useState('');
     const [message, setMessage] = useState('');
+
+    // Hydration flag — prevents saving before restoration completes
+    const [hydrated, setHydrated] = useState(false);
 
     // Feedback state
     const [feedback, setFeedback] = useState<FeedbackState>({ stage: 'idle' });
@@ -65,11 +76,52 @@ export default function GameClient({
     const [showFeedbackReminder, setShowFeedbackReminder] = useState(false);
     const feedbackReminderShown = useRef(false);
 
+    // Solve animation — triggers once when puzzle is first solved
+    const [solvedAnimating, setSolvedAnimating] = useState(false);
+    const solvedAnimationFired = useRef(false);
+
+    // Restore saved state on mount (runs before save effect due to ordering)
     useEffect(() => {
         if (!localStorage.getItem('ladder-seen-instructions')) {
             setShowInstructions(true);
         }
+
+        try {
+            const raw = localStorage.getItem(STORAGE_KEY);
+            if (raw) {
+                const saved = JSON.parse(raw) as SavedState;
+                if (
+                    saved?.puzzle?.start &&
+                    saved?.puzzle?.target &&
+                    saved?.puzzle?.neighborGraph &&
+                    Array.isArray(saved.moves) &&
+                    saved.moves.length > 0
+                ) {
+                    setPuzzle(saved.puzzle);
+                    setMoves(saved.moves);
+                    setHintsUsed(saved.hintsUsed ?? 0);
+                    // If they've already made moves, don't re-show the reminder
+                    if (saved.moves.length > 1) {
+                        feedbackReminderShown.current = true;
+                    }
+                    // If they already solved it, skip the solve animation
+                    if (saved.moves[saved.moves.length - 1] === saved.puzzle.target) {
+                        solvedAnimationFired.current = true;
+                    }
+                }
+            }
+        } catch {}
+
+        setHydrated(true);
     }, []);
+
+    // Save puzzle state on every move, after hydration
+    useEffect(() => {
+        if (!hydrated) return;
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify({ puzzle, moves, hintsUsed } satisfies SavedState));
+        } catch {}
+    }, [hydrated, puzzle, moves, hintsUsed]);
 
     function closeInstructions() {
         localStorage.setItem('ladder-seen-instructions', '1');
@@ -82,6 +134,15 @@ export default function GameClient({
         ...(puzzle.neighborGraph[currentWord] ?? []),
     ].sort();
     const flaggableWords = Array.from(new Set([puzzle.start, puzzle.target]));
+
+    // Trigger solve animation once when solved
+    useEffect(() => {
+        if (solved && !solvedAnimationFired.current) {
+            solvedAnimationFired.current = true;
+            setSolvedAnimating(true);
+            setTimeout(() => setSolvedAnimating(false), 600);
+        }
+    }, [solved]);
 
     // Clean up toast timer on unmount
     useEffect(() => {
@@ -204,6 +265,7 @@ export default function GameClient({
     }
 
     function generateAnother() {
+        try { localStorage.removeItem(STORAGE_KEY); } catch {}
         router.refresh();
     }
 
@@ -306,9 +368,7 @@ export default function GameClient({
 
             {/* ── Hints overlay ── */}
             {showHints && (
-                <div
-                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-                    onClick={() => setShowHints(false)}>
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
                     <div
                         className="bg-[var(--background)] border rounded-lg p-6 max-w-sm w-full mx-4 flex flex-col gap-4"
                         onClick={(e) => e.stopPropagation()}>
@@ -394,13 +454,26 @@ export default function GameClient({
 
                 {/* Move chain */}
                 <div className="flex flex-col gap-2">
-                    {moves.map((move, index) => (
-                        <div
-                            key={index}
-                            className="border-2 border-blue-500 rounded px-4 py-2 text-lg font-mono">
-                            {move}
-                        </div>
-                    ))}
+                    {moves.map((move, index) => {
+                        const isLast = index === moves.length - 1;
+                        const isSolvedTile = isLast && solved;
+                        return (
+                            <div
+                                key={index}
+                                className={[
+                                    'border-2 rounded px-4 py-2 text-lg font-mono',
+                                    isSolvedTile
+                                        ? 'border-green-500 text-green-600 dark:text-green-400'
+                                        : 'border-blue-500',
+                                    isSolvedTile && solvedAnimating
+                                        ? 'animate-pop'
+                                        : '',
+                                ].join(' ')}>
+                                {move}
+                                {isSolvedTile && <span className="ml-2 text-base">✓</span>}
+                            </div>
+                        );
+                    })}
                 </div>
 
                 {/* Input row */}
@@ -429,7 +502,11 @@ export default function GameClient({
                     </div>
                 )}
 
-                {message && <div className="text-sm opacity-80">{message}</div>}
+                {message && (
+                    <div className={`text-sm opacity-80 ${solved ? 'animate-fade-up font-semibold' : ''}`}>
+                        {message}
+                    </div>
+                )}
 
                 {/* ── Quality feedback ── */}
                 <div className="border-t pt-4 flex flex-col gap-3">

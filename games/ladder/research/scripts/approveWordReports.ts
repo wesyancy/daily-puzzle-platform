@@ -12,7 +12,6 @@
 import fs from 'fs';
 import path from 'path';
 import readline from 'readline';
-import { execSync } from 'child_process';
 import { loadPuzzleWords, loadCommonWords, bannedWords, createWordSet } from '@repo/dictionary';
 
 // ── Env vars ─────────────────────────────────────────────────────────────────
@@ -192,10 +191,6 @@ async function main() {
         return;
     }
 
-    const commonWordsPath = path.join(
-        process.cwd(),
-        '../../packages/dictionary/src/data/commonWords.txt',
-    );
     const puzzleWordsPath = path.join(
         process.cwd(),
         '../../packages/dictionary/src/data/puzzle-words.txt',
@@ -203,35 +198,16 @@ async function main() {
     const blockedWordsPath = path.join(process.cwd(), 'data/blocked-words.txt');
 
     if (approvedMissing.length > 0) {
-        // Append to commonWords.txt (lowercase, one per line)
-        const toAppend = approvedMissing.map((w) => w.toLowerCase()).join('\n') + '\n';
-        fs.appendFileSync(commonWordsPath, toAppend, 'utf-8');
-        console.log(`Appended ${approvedMissing.length} word(s) to commonWords.txt`);
+        // Load existing words, merge, deduplicate, sort, write back
+        const existing = fs
+            .readFileSync(puzzleWordsPath, 'utf-8')
+            .split('\n')
+            .map((w) => w.trim().toUpperCase())
+            .filter((w) => w.length > 0);
 
-        // Rebuild puzzle-words.txt
-        console.log('Rebuilding puzzle-words.txt...');
-        execSync('npx tsx research/scripts/buildWordList.ts', {
-            cwd: process.cwd(),
-            stdio: 'inherit',
-        });
-
-        // Verify each approved word made it in; add directly if not (not in enable1.txt)
-        const newPuzzleWords = createWordSet(loadPuzzleWords());
-        const addedDirectly: string[] = [];
-
-        for (const word of approvedMissing) {
-            if (!newPuzzleWords.has(word)) {
-                // Word isn't in enable1.txt — add directly to puzzle-words.txt
-                fs.appendFileSync(puzzleWordsPath, word + '\n', 'utf-8');
-                addedDirectly.push(word);
-            }
-        }
-
-        if (addedDirectly.length > 0) {
-            console.log(
-                `Note: ${addedDirectly.join(', ')} not found in enable1.txt — added directly to puzzle-words.txt`,
-            );
-        }
+        const merged = [...new Set([...existing, ...approvedMissing])].sort();
+        fs.writeFileSync(puzzleWordsPath, merged.join('\n') + '\n', 'utf-8');
+        console.log(`Added ${approvedMissing.length} word(s) to puzzle-words.txt (${merged.length} total)`);
     }
 
     if (approvedBad.length > 0) {
