@@ -115,8 +115,24 @@ A more flexible generator. See its `--help` output or the script header for all 
 | `--allow-rare` | off | Allow J, Z, V in start/target |
 | `--semantic` | off | Use Datamuse to find semantically related pairs |
 | `--save` | off | Append results to `data/suggested-pairs.txt` |
+| `--difficulty X` | — | Preset: `easy` \| `medium` \| `hard` (overrides move/branching flags) |
 
-**Method C: Manual curation**
+**Method C: Mathematical pair pool**
+
+```bash
+pnpm --filter @repo/ladder exec npx tsx research/scripts/buildPairPool.ts [options]
+```
+
+Exhaustively samples the word graph to produce a large scored pair pool (`data/pair-pool.txt`). No Datamuse, no semantic filter. With the expanded ~12k-word list, a 500k-sample run produces ~250k valid pairs across all difficulty tiers. The web app draws random sets from this pool at runtime.
+
+Key flags: `--min-moves`, `--max-moves`, `--min-branching`, `--min-avg`, `--sample N`, `--tier easy|medium|hard`.
+
+To score and calibrate existing pairs:
+```bash
+pnpm --filter @repo/ladder exec npx tsx research/scripts/scorePairs.ts data/word-pairs.txt
+```
+
+**Method D: Manual curation**
 
 Some pairs are hand-picked because they feel right: `HEAD,TAIL`, `FIND,LOSE`, `HIRE,SACK`, `LESS,MORE`. These go directly into `word-pairs.txt` and get validated on the next run of `validateWordPairs.ts`.
 
@@ -146,13 +162,19 @@ pnpm --filter @repo/ladder exec npx tsx research/scripts/validateWordPairs.ts
 
 | Script | Purpose |
 |---|---|
-| `buildWordList.ts` | Rebuild `puzzle-words.txt` from source files |
+| `buildWordList.ts` | Rebuild `puzzle-words.txt` (now uses blocklist-out, not commonWords allowlist) |
+| `buildPairPool.ts` | Generate scored pair pool from expanded word list → `data/pair-pool.txt` |
+| `scorePairs.ts` | Score and tier any pairs file; primary calibration tool for difficulty formula |
+| `generatePuzzle.ts` | Configurable generator with `--difficulty easy\|medium\|hard` preset |
 | `suggestWordPairs.ts` | Find semantically related pairs via Datamuse → `suggested-pairs.txt` |
-| `generatePuzzle.ts` | Configurable generator: random or semantic, all thresholds adjustable |
 | `validateWordPairs.ts` | Validate `word-pairs.txt` (or any pairs file), overwrite with passing pairs |
 | `reviewWordReports.ts` | Read player word reports from Supabase, classify and summarize |
 | `approveWordReports.ts` | Interactive: approve/deny word reports, auto-adds to `commonWords.txt` |
 | `analyzeLetterBranches.ts` | Per-letter branch analysis: how many valid neighbors each position has |
+
+### Difficulty scoring
+
+`research/lib/difficultyScore.ts` provides `computeDifficultyProfile(path, wordSet)` — a composite 1–10 difficulty score based on path length, position concentration, average branching, and min branching. Tier thresholds are calibrated for the expanded ~12k-word set (Easy ≤6, Medium 7–8, Hard ≥9). See `GAME_DESIGN.md` for the full formula and rationale.
 
 ### Quality judgment calls
 

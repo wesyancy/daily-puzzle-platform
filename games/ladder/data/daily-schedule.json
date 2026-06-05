@@ -1,0 +1,7 @@
+{
+  "2026-06-02": {
+    "easy":   ["COLD", "WARM"],
+    "medium": ["FIND", "LOSE"],
+    "hard":   ["LEND", "EARS"]
+  }
+}

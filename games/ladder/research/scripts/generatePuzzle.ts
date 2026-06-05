@@ -18,6 +18,12 @@
  *   --allow-rare        Allow J, Z, V in start/target words
  *   --semantic          Use Datamuse to find semantically related pairs (slower)
  *   --save              Append results to data/suggested-pairs.txt
+ *   --difficulty X      Preset: easy | medium | hard (overrides move/branching flags)
+ *
+ * Difficulty presets (calibrated for the expanded 12k-word set):
+ *   easy:   4-move paths, high branching floor (score ≈ 5–6)
+ *   medium: 5-move paths, standard branching (score ≈ 7–8)
+ *   hard:   6–7-move paths, relaxed branching floor (score ≈ 9–10)
  *
  * Examples:
  *   # 10 random 4-letter puzzles with the default quality bar
@@ -38,8 +44,9 @@
 
 import fs from 'fs';
 import path from 'path';
-import { loadPuzzleWords, createWordSet, getNeighbors } from '@repo/dictionary';
+import { loadPuzzleWords, createWordSet, getNeighbors, loadCommonWords } from '@repo/dictionary';
 import { bfsShortestPath } from '@repo/game-engine';
+import { computeDifficultyProfile, tierEmoji } from '../lib/difficultyScore';
 
 // ── Arg parsing ────────────────────────────────────────────────────────────────
 
@@ -52,21 +59,39 @@ function getNumArg(flag: string, defaultVal: number): number {
     return isNaN(val) ? defaultVal : val;
 }
 
+function getStrArg(flag: string, defaultVal: string): string {
+    const i = argv.indexOf(flag);
+    if (i === -1) return defaultVal;
+    return argv[i + 1] ?? defaultVal;
+}
+
 function hasFlag(flag: string): boolean {
     return argv.includes(flag);
 }
 
+// Difficulty presets — calibrated for the expanded ~12k-word set.
+// Path length is the primary tier selector; branching floors avoid forced/trivial steps.
+const DIFFICULTY_PRESETS: Record<string, { minMoves: number; maxMoves: number; minBranching: number; minAvg: number }> = {
+    easy:   { minMoves: 4, maxMoves: 4, minBranching: 10, minAvg: 12 },
+    medium: { minMoves: 5, maxMoves: 5, minBranching: 7,  minAvg: 10 },
+    hard:   { minMoves: 6, maxMoves: 7, minBranching: 3,  minAvg: 6  },
+};
+
+const difficultyPreset = getStrArg('--difficulty', '');
+const preset = DIFFICULTY_PRESETS[difficultyPreset];
+
 const opts = {
     count:        getNumArg('--count',         5),
-    minMoves:     getNumArg('--min-moves',     4),
-    maxMoves:     getNumArg('--max-moves',     5),
-    minBranching: getNumArg('--min-branching', 7),
-    minAvg:       getNumArg('--min-avg',       7),
+    minMoves:     preset?.minMoves     ?? getNumArg('--min-moves',     4),
+    maxMoves:     preset?.maxMoves     ?? getNumArg('--max-moves',     5),
+    minBranching: preset?.minBranching ?? getNumArg('--min-branching', 7),
+    minAvg:       preset?.minAvg       ?? getNumArg('--min-avg',       7),
     length:       getNumArg('--length',        4),
     similarity:   getNumArg('--similarity',    0),
     allowRare:    hasFlag('--allow-rare'),
     semantic:     hasFlag('--semantic'),
     save:         hasFlag('--save'),
+    difficulty:   difficultyPreset,
 };
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -240,7 +265,8 @@ async function semanticSearch(
 
 // ── Output ─────────────────────────────────────────────────────────────────────
 
-function printResult(r: PuzzleResult, i: number): void {
+function printResult(r: PuzzleResult, wordSet: Set<string>, i: number): void {
+    const profile = computeDifficultyProfile(r.path, wordSet);
     console.log(
         `\n── Puzzle ${i + 1} ─────────────────────────────────────────────`,
     );
@@ -248,6 +274,9 @@ function printResult(r: PuzzleResult, i: number): void {
     console.log(`  Path (${r.moves} moves):  ${r.path.join(' → ')}`);
     console.log(
         `  Avg branching: ${r.avgBranching}   Min branching: ${r.minBranching}   Shared position letters: ${r.similarity}`,
+    );
+    console.log(
+        `  Difficulty: ${profile.difficultyScore}/10  ${tierEmoji(profile.difficultyTier)} ${profile.difficultyTier}   Concentration: ${profile.avgPositionConcentration}   Locked positions: ${profile.lockedPositionTotal}`,
     );
 }
 
@@ -269,14 +298,19 @@ async function main() {
     const allWords = loadPuzzleWords();
     const wordSet = createWordSet(allWords);
 
+    // Puzzle endpoints must be familiar — commonWords gates start/target only.
+    // The full wordSet is still used for BFS and neighbor computation.
+    const commonWords = loadCommonWords();
     const candidates = allWords.filter((w) => {
         if (w.length !== opts.length) return false;
+        if (!commonWords.has(w)) return false;
         if (!opts.allowRare && !isRareFree(w)) return false;
         return true;
     });
 
     const modeLabel = opts.semantic ? 'semantic (Datamuse)' : 'random';
-    console.log(`\nMode: ${modeLabel}`);
+    const presetLabel = opts.difficulty ? `  preset=${opts.difficulty}` : '';
+    console.log(`\nMode: ${modeLabel}${presetLabel}`);
     console.log(
         `Settings: length=${opts.length}  moves=${opts.minMoves}–${opts.maxMoves}  branching: min≥${opts.minBranching} avg≥${opts.minAvg}  similarity≥${opts.similarity}${opts.allowRare ? '  rare-letters=on' : ''}`,
     );
@@ -291,7 +325,7 @@ async function main() {
     }
 
     for (let i = 0; i < results.length; i++) {
-        printResult(results[i], i);
+        printResult(results[i], wordSet, i);
     }
 
     console.log(
