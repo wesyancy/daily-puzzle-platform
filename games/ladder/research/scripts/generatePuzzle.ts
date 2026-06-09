@@ -1,5 +1,5 @@
 /**
- * Configurable puzzle generator for Steple.
+ * Configurable puzzle generator for Stepladder.
  *
  * Finds START→TARGET pairs that meet adjustable quality thresholds.
  * Default settings match the validated profile used in word-pairs.txt.
@@ -196,6 +196,9 @@ function randomSearch(
         const q = checkQuality(start, target, wordSet);
         if (!q.pass) continue;
 
+        // Clean path check — every word on the path must be a common/familiar word
+        if (!q.path.every((w) => commonWords.has(w))) continue;
+
         found.push({ ...q, start, target, similarity: sim });
         process.stdout.write(
             `  [${found.length}/${opts.count}] ${start} → ${target}  moves=${q.moves} avg=${q.avgBranching} min=${q.minBranching} sim=${sim}\n`,
@@ -253,6 +256,9 @@ async function semanticSearch(
             const q = checkQuality(word, related, wordSet);
             if (!q.pass) continue;
 
+            // Clean path check — every word on the path must be a common/familiar word
+            if (!q.path.every((w) => commonWords.has(w))) continue;
+
             found.push({ ...q, start: word, target: related, similarity: sim });
             process.stdout.write(
                 `  [${found.length}/${opts.count}] ${word} → ${related}  moves=${q.moves} avg=${q.avgBranching} min=${q.minBranching} sim=${sim}\n`,
@@ -294,13 +300,14 @@ function saveResults(results: PuzzleResult[]): void {
 
 // ── Main ───────────────────────────────────────────────────────────────────────
 
-async function main() {
-    const allWords = loadPuzzleWords();
-    const wordSet = createWordSet(allWords);
+// Module-level word sets — shared by main() and search functions
+const _allWords = loadPuzzleWords();
+const wordSet = createWordSet(_allWords);
+// commonWords gates both start/target candidates AND path intermediates.
+const commonWords = loadCommonWords();
 
-    // Puzzle endpoints must be familiar — commonWords gates start/target only.
-    // The full wordSet is still used for BFS and neighbor computation.
-    const commonWords = loadCommonWords();
+async function main() {
+    const allWords = _allWords;
     const candidates = allWords.filter((w) => {
         if (w.length !== opts.length) return false;
         if (!commonWords.has(w)) return false;

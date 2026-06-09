@@ -1,4 +1,4 @@
-# Steple — Game Design Decisions
+# Stepladder — Game Design Decisions
 
 Each section records a decision, the rationale behind it, the current value, and the levers available to adjust it.
 
@@ -166,14 +166,14 @@ rawScore =
 
 **Current format:**
 ```
-Steple — June 2
+Stepladder — June 2
 🟢 Easy    ✓ 4 moves  (par 4)
 🟡 Medium  ✓ 6 moves  (par 5, +1)
 🔴 Hard    ✗  (par 6)
-steple.app
+stepladder.app
 ```
 
-**Levers:** `buildShareText()` in `GameClient.tsx`. The domain (`steple.app`) and emoji scheme are easily adjusted.
+**Levers:** `buildShareText()` in `GameClient.tsx`. The domain (`stepladder.app`) and emoji scheme are easily adjusted.
 
 ---
 
@@ -183,7 +183,7 @@ steple.app
 
 **Rationale:** The server generates a new random puzzle set on every request. If the client has a saved state from a previous set, restoring from localStorage after SSR causes a visible flash (server renders set A, client switches to set B). Disabling SSR on `GameClient` eliminates this entirely — the component only renders client-side, where localStorage is immediately available.
 
-**Current state key:** `steple-set-state` in localStorage. Structure:
+**Current state key:** `stepladder-set-state` in localStorage. Structure:
 ```typescript
 { setId: string, puzzles: Record<Tier, { moves, status, hintsUsed }> }
 ```

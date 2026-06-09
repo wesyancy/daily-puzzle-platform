@@ -123,7 +123,7 @@ if (outputFile) {
     const outputPath = path.join(process.cwd(), outputFile);
 
     const header = [
-        `# Steple scored pair pool`,
+        `# Stepladder scored pair pool`,
         `# Source: ${inputFile}`,
         `# Format: START,TARGET  # score=N tier=X moves=N avg=N min=N`,
         ``,

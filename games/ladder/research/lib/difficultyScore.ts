@@ -1,5 +1,5 @@
 /**
- * Difficulty scoring for Steple puzzle pairs.
+ * Difficulty scoring for Stepladder puzzle pairs.
  *
  * Computes a DifficultyProfile from an optimal path through the word graph,
  * including per-position branch analysis and a composite 1–10 difficulty score.

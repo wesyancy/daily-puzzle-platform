@@ -59,10 +59,10 @@ function hasFlag(flag: string): boolean {
 
 const opts = {
     length:       getNumArg('--length',        4),
-    minMoves:     getNumArg('--min-moves',     3),
-    maxMoves:     getNumArg('--max-moves',     7),
-    minBranching: getNumArg('--min-branching', 5),
-    minAvg:       getNumArg('--min-avg',       8),
+    minMoves:     getNumArg('--min-moves',     4),
+    maxMoves:     getNumArg('--max-moves',     5),
+    minBranching: getNumArg('--min-branching', 7),
+    minAvg:       getNumArg('--min-avg',       9),
     allowRare:    hasFlag('--allow-rare'),
     output:       getStrArg('--output',        'data/pair-pool.txt'),
     sample:       getNumArg('--sample',        500_000),
@@ -143,6 +143,9 @@ while (attempts < opts.sample) {
     const moves = p.length - 1;
     if (moves < opts.minMoves || moves > opts.maxMoves) continue;
 
+    // Clean path check — every word on the path must be a common/familiar word
+    if (!p.every((w) => commonWords.has(w))) continue;
+
     // Quick branching pre-filter before the expensive per-position analysis
     const branchCounts = p.map((w) => getNeighbors(w, wordSet).length);
     const minBranch = Math.min(...branchCounts);
@@ -193,7 +196,7 @@ function section(label: string, pairs: PoolEntry[]): string {
 
 const outputPath = path.join(process.cwd(), opts.output);
 const header = [
-    `# Steple pair pool`,
+    `# Stepladder pair pool`,
     `# Generated: ${new Date().toISOString().split('T')[0]}`,
     `# Word length: ${opts.length}   Moves: ${opts.minMoves}–${opts.maxMoves}   Sample: ${attempts.toLocaleString()}`,
     `# Pairs: ${results.length} (easy: ${easy.length}, medium: ${medium.length}, hard: ${hard.length})`,

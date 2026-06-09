@@ -1,4 +1,4 @@
-# Steple
+# Stepladder
 
 A daily word ladder game. Change one letter at a time to get from the start word to the target word in as few moves as possible.
 

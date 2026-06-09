@@ -1,5 +1,5 @@
 /**
- * Puzzle set generation for Steple.
+ * Puzzle set generation for Stepladder.
  *
  * Returns a PuzzleSet of three tiered puzzles (easy → medium → hard).
  *
@@ -236,7 +236,7 @@ function getDailyPuzzleSet(): PuzzleSet {
 
     if (!entry) {
         // No schedule entry for today — fall back to random
-        console.warn(`[steple] No daily schedule entry for ${today}, falling back to random set`);
+        console.warn(`[stepladder] No daily schedule entry for ${today}, falling back to random set`);
         return getRandomPuzzleSet();
     }
 
