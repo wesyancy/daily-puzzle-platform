@@ -1,11 +1,16 @@
 /**
  * Generates packages/dictionary/src/data/puzzle-words.txt
  *
- * This is a dev/build script — run it whenever filtering criteria change:
+ * Pipeline: enable1.txt → filterWords → filterBannedWords → filterExcludedWords → puzzle-words.txt
+ *
+ * The commonWords allowlist has been removed in favour of a blocklist approach:
+ * words are included by default and removed explicitly via excluded-words.txt.
+ * This produces a much larger, more complete word set for gameplay.
+ *
+ * To run:
  *   pnpm --filter @repo/ladder exec npx tsx research/scripts/buildWordList.ts
  *
- * The output file is committed to the repo and loaded at runtime.
- * enable1.txt and commonWords.txt are only needed to regenerate it.
+ * After regenerating, re-run validateWordPairs.ts — branching factors will have changed.
  */
 
 import fs from 'fs';
@@ -15,15 +20,25 @@ import {
     loadDictionary,
     filterWords,
     filterBannedWords,
-    loadCommonWords,
-    filterCommonWords,
 } from '@repo/dictionary';
+
+// Load the gameplay blocklist (words valid in English but bad as puzzle words)
+const excludedWordsPath = path.join(
+    process.cwd(),
+    '../../games/ladder/data/excluded-words.txt',
+);
+const excludedWords = new Set(
+    fs
+        .readFileSync(excludedWordsPath, 'utf-8')
+        .split('\n')
+        .map((l) => l.trim().toUpperCase())
+        .filter((l) => l.length > 0 && !l.startsWith('#')),
+);
 
 const raw = loadDictionary();
 const filtered = filterWords(raw);
 const cleaned = filterBannedWords(filtered);
-const common = loadCommonWords();
-const final = filterCommonWords(cleaned, common);
+const final = cleaned.filter((w) => !excludedWords.has(w));
 
 // Keep only 4 and 5 letter words — the lengths this game will ever use.
 const puzzleWords = final
@@ -43,3 +58,4 @@ const count5 = puzzleWords.filter((w) => w.length === 5).length;
 console.log(`Written ${puzzleWords.length} words to puzzle-words.txt`);
 console.log(`  4-letter: ${count4}`);
 console.log(`  5-letter: ${count5}`);
+console.log(`  Excluded: ${excludedWords.size} words from excluded-words.txt`);

@@ -1,0 +1,10 @@
+# Words excluded from gameplay entirely.
+# These are valid English words (in enable1.txt) that are poor puzzle words —
+# archaic, offensive-adjacent, confusing abbreviations, or otherwise jarring.
+#
+# Format: one word per line, uppercase.
+# This is NOT the puzzle start/target blocklist — see blocked-words.txt for that.
+# This list grows over time based on player feedback and editorial judgment.
+#
+# To rebuild puzzle-words.txt after editing this file:
+#   pnpm --filter @repo/ladder exec npx tsx research/scripts/buildWordList.ts

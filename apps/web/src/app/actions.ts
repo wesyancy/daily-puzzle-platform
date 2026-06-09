@@ -11,6 +11,8 @@ export interface FeedbackPayload {
     rating: 'good' | 'bad';
     reason: string;
     timestamp: string;
+    /** Which difficulty tier this puzzle was (easy/medium/hard in the trio format). */
+    tier?: 'easy' | 'medium' | 'hard';
 }
 
 export interface WordReportPayload {
@@ -31,6 +33,7 @@ export async function submitFeedback(payload: FeedbackPayload): Promise<void> {
         solved: payload.solved,
         rating: payload.rating,
         reason: payload.reason,
+        tier: payload.tier ?? null,
     });
 
     if (error) {

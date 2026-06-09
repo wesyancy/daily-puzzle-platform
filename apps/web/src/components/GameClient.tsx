@@ -1,189 +1,281 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { submitFeedback, submitWordReport } from '@/app/actions';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import type { PuzzleSet, Tier, TieredPuzzle } from '@/lib/generatePuzzle';
 
-type Puzzle = {
-    start: string;
-    target: string;
-    optimalPath: string[];
-    neighborGraph: Record<string, string[]>;
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+type PuzzleStatus = 'not-started' | 'in-progress' | 'passed' | 'failed';
+
+type PuzzleProgress = {
+    moves: string[];
+    status: PuzzleStatus;
+    hintsUsed: number;
+    /** The word the player was on when they last opened a hint. Used to ensure
+     *  a hint is only charged once per word — opening again for the same word
+     *  is free, even after a refresh. */
+    hintWord: string | null;
+};
+
+type SetState = {
+    setId: string;
+    puzzles: Record<Tier, PuzzleProgress>;
 };
 
 type FeedbackRating = 'good' | 'bad';
 
-type FeedbackState =
-    | { stage: 'idle' }
-    | { stage: 'asking'; rating: FeedbackRating }
-    | { stage: 'submitted' };
-
 type WordReportStage = 'idle' | 'missing' | 'bad';
 
-const GOOD_REASONS = [
-    'Great words',
-    'Right difficulty',
-    'Satisfying path',
-    'Felt clever',
-];
+// ── Constants ─────────────────────────────────────────────────────────────────
 
-const BAD_REASONS = ['Too easy', 'Too hard', 'Obscure words', 'Felt random'];
+const STATE_KEY = 'stepladder-set-state';
+const PUZZLE_KEY = 'stepladder-puzzle-set';
+const TIERS: Tier[] = ['easy', 'medium', 'hard'];
+const TIER_LABELS: Record<Tier, string> = { easy: 'Easy', medium: 'Medium', hard: 'Hard' };
+const TIER_EMOJI: Record<Tier, string> = { easy: '🟢', medium: '🟡', hard: '🔴' };
+const TIER_NUMBER: Record<Tier, number> = { easy: 1, medium: 2, hard: 3 };
 
-const STORAGE_KEY = 'ladder-puzzle-state';
+const ADVANCE_DELAY_PASS = 3000;  // ms after solving before auto-advancing
+const ADVANCE_DELAY_FAIL = 4000;  // ms after failing before auto-advancing
 
-type SavedState = {
-    puzzle: Puzzle;
-    moves: string[];
-    hintsUsed: number;
+function freshProgress(start: string): PuzzleProgress {
+    return { moves: [start], status: 'not-started', hintsUsed: 0, hintWord: null };
+}
+
+function freshState(setId: string, puzzleSet: PuzzleSet): SetState {
+    return {
+        setId,
+        puzzles: {
+            easy:   freshProgress(puzzleSet.easy.start),
+            medium: freshProgress(puzzleSet.medium.start),
+            hard:   freshProgress(puzzleSet.hard.start),
+        },
+    };
+}
+
+/**
+ * Reads localStorage synchronously and returns the full saved game state.
+ * Safe to call in useState lazy initializers because with ssr:false this
+ * component never server-renders — window/localStorage always exist here.
+ */
+type StoredGame = {
+    puzzleSet: PuzzleSet;
+    state: SetState;
+    activeTier: Tier;
+    showSummary: boolean;
 };
 
-export default function GameClient({
-    initialPuzzle,
-}: {
-    initialPuzzle: Puzzle;
-}) {
+function loadStoredGame(fallbackSet: PuzzleSet): StoredGame {
+    try {
+        const savedSet = JSON.parse(localStorage.getItem(PUZZLE_KEY) ?? '') as PuzzleSet;
+        if (savedSet?.id && savedSet?.easy && savedSet?.medium && savedSet?.hard) {
+            const savedState = JSON.parse(localStorage.getItem(STATE_KEY) ?? '') as SetState;
+            if (savedState?.setId === savedSet.id && savedState?.puzzles) {
+                const allDone = TIERS.every(
+                    (t) => savedState.puzzles[t]?.status === 'passed' || savedState.puzzles[t]?.status === 'failed',
+                );
+                const activeTier = allDone
+                    ? 'easy'
+                    : (TIERS.find(
+                          (t) => savedState.puzzles[t]?.status === 'not-started' ||
+                                 savedState.puzzles[t]?.status === 'in-progress',
+                      ) ?? 'easy');
+                return { puzzleSet: savedSet, state: savedState, activeTier, showSummary: allDone };
+            }
+        }
+    } catch {}
+    return {
+        puzzleSet: fallbackSet,
+        state: freshState(fallbackSet.id, fallbackSet),
+        activeTier: 'easy',
+        showSummary: false,
+    };
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
+export default function GameClient({ puzzleSet }: { puzzleSet: PuzzleSet }) {
     const router = useRouter();
 
-    const [puzzle, setPuzzle] = useState<Puzzle>(initialPuzzle);
-    const [moves, setMoves] = useState<string[]>([initialPuzzle.start]);
+    // ── State ─────────────────────────────────────────────────────────────────
+
+    // All state is lazy-initialized from localStorage so refresh restores correctly.
+    // The server-generated puzzleSet prop is only the fallback when no saved state exists.
+    const [_stored] = useState<StoredGame>(() => loadStoredGame(puzzleSet));
+    const [activePuzzleSet] = useState<PuzzleSet>(_stored.puzzleSet);
+    const [state, setState] = useState<SetState>(_stored.state);
+    const [activeTier, setActiveTier] = useState<Tier>(_stored.activeTier);
+    const [showSummaryInit] = useState<boolean>(_stored.showSummary);
+    const [hydrated, setHydrated] = useState(false);
+
     const [input, setInput] = useState('');
     const [message, setMessage] = useState('');
 
-    // Hydration flag — prevents saving before restoration completes
-    const [hydrated, setHydrated] = useState(false);
+    // Modals
+    const [showInstructions, setShowInstructions] = useState(false);
+    const [instructionsPage, setInstructionsPage] = useState<1 | 2 | 3>(1);
+    const [showHints, setShowHints] = useState(false);
+    const [showSummary, setShowSummary] = useState(showSummaryInit);
+    const [showNewSetModal, setShowNewSetModal] = useState(false);
+    const [showWordReportModal, setShowWordReportModal] = useState(false);
 
-    // Feedback state machine
-    const [feedback, setFeedback] = useState<FeedbackState>({ stage: 'idle' });
+    // Per-tier feedback ratings collected in the "New set" modal
+    const [newSetRatings, setNewSetRatings] = useState<Partial<Record<Tier, FeedbackRating>>>({});
 
-    // Word report state
-    const [wordReportStage, setWordReportStage] =
-        useState<WordReportStage>('idle');
+    // Word report
+    const [wordReportStage, setWordReportStage] = useState<WordReportStage>('idle');
     const [wordReportInput, setWordReportInput] = useState('');
     const [wordReportToast, setWordReportToast] = useState('');
     const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    // Hints popup
-    const [showHints, setShowHints] = useState(false);
-    const [hintsUsed, setHintsUsed] = useState(0);
-    // Tracks whether the hint has been consumed for the current word position.
-    // Reopening costs nothing until a new word is played.
-    const [hintConsumedForWord, setHintConsumedForWord] = useState(false);
-
-    // How to play modal — auto-opens on first visit
-    const [showInstructions, setShowInstructions] = useState(false);
-
-    // Word report modal
-    const [showWordReportModal, setShowWordReportModal] = useState(false);
-
-    function closeWordReportModal() {
-        setShowWordReportModal(false);
-        setWordReportStage('idle');
-        setWordReportInput('');
-    }
-
-    // Post-puzzle feedback modal — slides up from bottom on mobile
-    const [showFeedbackModal, setShowFeedbackModal] = useState(false);
-    const [feedbackModalContext, setFeedbackModalContext] = useState<
-        'solved' | 'abandoned'
-    >('abandoned');
-    const feedbackModalFired = useRef(false);
-
-    // Solve animation — triggers once when puzzle is first solved
+    // Solve animation
     const [solvedAnimating, setSolvedAnimating] = useState(false);
-    const solvedAnimationFired = useRef(false);
+    const solvedAnimationFired = useRef<Set<Tier>>(new Set());
 
-    // Scrollable word chain area — auto-scrolls to latest card
+    // Result modal (shown immediately on pass/fail, auto-dismisses when advance fires)
+    type ResultModal = { passed: boolean; movesTaken: number; shortestPath: number };
+    const [resultModal, setResultModal] = useState<ResultModal | null>(null);
+
+    // Hint tracking: derived from persisted progress — survives refresh correctly.
+    // A hint charge only applies once per word; reopening for the same word is free.
+
+    // Scroll + clipboard
     const scrollAreaRef = useRef<HTMLDivElement>(null);
+    const [shareCopied, setShareCopied] = useState(false);
 
-    // Restore saved state on mount
+    // Flash animation: tracks the index of the most recently played word tile
+    const [flashTileIndex, setFlashTileIndex] = useState(-1);
+    const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    // Auto-advance timer
+    const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    // ── One-time mount effect ─────────────────────────────────────────────────
+    // State is already initialized from localStorage via lazy initializers above.
+    // This effect only handles: instructions first-visit check, marking already-
+    // completed tiers so their animations don't re-fire, and setting hydrated.
+
     useEffect(() => {
-        if (!localStorage.getItem('ladder-seen-instructions')) {
+        if (!localStorage.getItem('stepladder-seen-instructions')) {
+            setInstructionsPage(1);
             setShowInstructions(true);
         }
 
-        try {
-            const raw = localStorage.getItem(STORAGE_KEY);
-            if (raw) {
-                const saved = JSON.parse(raw) as SavedState;
-                if (
-                    saved?.puzzle?.start &&
-                    saved?.puzzle?.target &&
-                    saved?.puzzle?.neighborGraph &&
-                    Array.isArray(saved.moves) &&
-                    saved.moves.length > 0
-                ) {
-                    setPuzzle(saved.puzzle);
-                    setMoves(saved.moves);
-                    setHintsUsed(saved.hintsUsed ?? 0);
-                    if (saved.moves[saved.moves.length - 1] === saved.puzzle.target) {
-                        // Already solved — skip animation and modal on restore
-                        solvedAnimationFired.current = true;
-                        feedbackModalFired.current = true;
-                    }
-                }
+        // Populate solvedAnimationFired from restored state so animations
+        // don't re-trigger on completed tiers after a refresh.
+        for (const t of TIERS) {
+            if (state.puzzles[t]?.status === 'passed' || state.puzzles[t]?.status === 'failed') {
+                solvedAnimationFired.current.add(t);
             }
-        } catch {}
+        }
 
         setHydrated(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    // Save puzzle state on every move, after hydration
+    // ── Persist on every change ───────────────────────────────────────────────
+
     useEffect(() => {
         if (!hydrated) return;
         try {
-            localStorage.setItem(
-                STORAGE_KEY,
-                JSON.stringify({ puzzle, moves, hintsUsed } satisfies SavedState),
-            );
+            localStorage.setItem(STATE_KEY, JSON.stringify(state));
+            localStorage.setItem(PUZZLE_KEY, JSON.stringify(activePuzzleSet));
         } catch {}
-    }, [hydrated, puzzle, moves, hintsUsed]);
+    }, [hydrated, state, activePuzzleSet]);
 
-    function closeInstructions() {
-        localStorage.setItem('ladder-seen-instructions', '1');
-        setShowInstructions(false);
-    }
+    // ── Derived values for active puzzle ──────────────────────────────────────
 
+    const activePuzzle: TieredPuzzle = activePuzzleSet[activeTier];
+    const progress: PuzzleProgress = state.puzzles[activeTier];
+    const moves = progress.moves;
     const currentWord = moves[moves.length - 1];
-    const solved = currentWord === puzzle.target;
-    const validNextWords = [
-        ...(puzzle.neighborGraph[currentWord] ?? []),
-    ].sort();
+    const solved = currentWord === activePuzzle.target;
+    const failed = progress.status === 'failed';
+    // Move limiter disabled — atLimit always false. Re-enable by restoring moveCount check.
+    const atLimit = false;
+    // Derived from persisted progress: true if the hint was already opened for the current word.
+    const hintConsumedForWord = progress.hintWord === currentWord;
+    const validNextWords = [...(activePuzzle.neighborGraph[currentWord] ?? [])].sort();
 
-    // Trigger solve animation, then open feedback modal
-    useEffect(() => {
-        if (solved && !solvedAnimationFired.current) {
-            solvedAnimationFired.current = true;
-            setSolvedAnimating(true);
-            setTimeout(() => {
-                setSolvedAnimating(false);
-                if (!feedbackModalFired.current) {
-                    feedbackModalFired.current = true;
-                    setFeedbackModalContext('solved');
-                    setShowFeedbackModal(true);
-                }
-            }, 900);
+    // ── Auto-advance after pass/fail ──────────────────────────────────────────
+
+    const advance = useCallback(() => {
+        setResultModal(null);
+        const nextTier = TIERS.find(
+            (t) => state.puzzles[t].status === 'not-started' || state.puzzles[t].status === 'in-progress',
+        );
+        if (nextTier) {
+            setActiveTier(nextTier);
+            setInput('');
+            setMessage('');
+        } else {
+            setShowSummary(true);
         }
-    }, [solved]);
+    }, [state.puzzles]);
 
-    // Auto-scroll word chain to latest card
+    // Solve animation + result modal + auto-advance scheduling
+    useEffect(() => {
+        if (solved && !solvedAnimationFired.current.has(activeTier)) {
+            solvedAnimationFired.current.add(activeTier);
+            setSolvedAnimating(true);
+            const movesTaken = state.puzzles[activeTier].moves.length - 1;
+            const shortestPath = activePuzzleSet[activeTier].optimalPath.length - 1;
+            setResultModal({ passed: true, movesTaken, shortestPath });
+            advanceTimerRef.current = setTimeout(() => {
+                setSolvedAnimating(false);
+                advance();
+            }, ADVANCE_DELAY_PASS);
+        }
+    }, [solved, activeTier, advance, state.puzzles, activePuzzleSet]);
+
+    // Fail result modal + auto-advance scheduling
+    useEffect(() => {
+        if (failed && !solvedAnimationFired.current.has(activeTier)) {
+            solvedAnimationFired.current.add(activeTier);
+            const shortestPath = activePuzzleSet[activeTier].optimalPath.length - 1;
+            setResultModal({ passed: false, movesTaken: activePuzzle.moveLimit, shortestPath });
+            advanceTimerRef.current = setTimeout(() => {
+                advance();
+            }, ADVANCE_DELAY_FAIL);
+        }
+    }, [failed, activeTier, advance, activePuzzleSet, activePuzzle.moveLimit]);
+
+    // Cleanup timers
+    useEffect(() => {
+        return () => {
+            if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
+            if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+            if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+        };
+    }, []);
+
+    // Auto-scroll word chain
     useEffect(() => {
         if (scrollAreaRef.current) {
             scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
         }
     }, [moves]);
 
-    // Clean up toast timer on unmount
-    useEffect(() => {
-        return () => {
-            if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-        };
-    }, []);
+    // ── State helpers ─────────────────────────────────────────────────────────
 
-    function showToast(msg: string) {
-        setWordReportToast(msg);
-        if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-        toastTimerRef.current = setTimeout(() => setWordReportToast(''), 2500);
+    function updateProgress(tier: Tier, update: Partial<PuzzleProgress>) {
+        setState((prev) => ({
+            ...prev,
+            puzzles: {
+                ...prev.puzzles,
+                [tier]: { ...prev.puzzles[tier], ...update },
+            },
+        }));
+    }
+
+    // ── Instructions ──────────────────────────────────────────────────────────
+
+    function closeInstructions() {
+        localStorage.setItem('stepladder-seen-instructions', '1');
+        setShowInstructions(false);
     }
 
     // ── Gameplay ──────────────────────────────────────────────────────────────
@@ -196,18 +288,17 @@ export default function GameClient({
     }
 
     function submitMove(word?: string) {
+        if (solved || failed) return;
         const guess = (word ?? input).trim().toUpperCase();
         if (!guess) return;
 
-        const validNeighbors = puzzle.neighborGraph[currentWord] ?? [];
+        const validNeighbors = activePuzzle.neighborGraph[currentWord] ?? [];
         if (!validNeighbors.includes(guess)) {
             const diff = letterDiff(currentWord, guess);
             if (diff === 0) {
                 setMessage("That's the word you're already on.");
             } else if (diff !== 1) {
-                setMessage(
-                    `One-letter rule: that changes ${diff === Infinity ? 'the wrong number of' : diff} letters.`,
-                );
+                setMessage(`One-letter rule: that changes ${diff === Infinity ? 'the wrong number of' : diff} letters.`);
             } else {
                 setMessage('Not in the word list.');
             }
@@ -215,14 +306,23 @@ export default function GameClient({
         }
 
         const nextMoves = [...moves, guess];
-        setMoves(nextMoves);
+        const nowSolved = guess === activePuzzle.target;
+
+        // Move limiter disabled — puzzles can only be completed by solving them.
+        // Re-enable by restoring the nowFailed / moveLimit check here.
+        const newStatus: PuzzleStatus = nowSolved ? 'passed' : 'in-progress';
+
+        updateProgress(activeTier, { moves: nextMoves, status: newStatus });
         setInput('');
         setShowHints(false);
-        setHintConsumedForWord(false);
 
-        if (guess === puzzle.target) {
-            setMessage(`Solved in ${nextMoves.length - 1} moves!`);
-        } else {
+        // Flash the new tile briefly
+        const newIdx = nextMoves.length - 1;
+        setFlashTileIndex(newIdx);
+        if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+        flashTimerRef.current = setTimeout(() => setFlashTileIndex(-1), 500);
+
+        if (!nowSolved) {
             setMessage('');
         }
     }
@@ -236,30 +336,19 @@ export default function GameClient({
         setShowHints(false);
     }
 
-    // ── Quality feedback ──────────────────────────────────────────────────────
+    // ── Word report ───────────────────────────────────────────────────────────
 
-    function handleFeedback(rating: FeedbackRating) {
-        setFeedback({ stage: 'asking', rating });
+    function showToast(msg: string) {
+        setWordReportToast(msg);
+        if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+        toastTimerRef.current = setTimeout(() => setWordReportToast(''), 2500);
     }
 
-    async function handleReason(reason: string) {
-        if (feedback.stage !== 'asking') return;
-        await submitFeedback({
-            start: puzzle.start,
-            target: puzzle.target,
-            optimalPathLength: puzzle.optimalPath.length - 1,
-            movesTaken: moves.length - 1,
-            solved,
-            rating: feedback.rating,
-            reason,
-            timestamp: new Date().toISOString(),
-        });
-        setFeedback({ stage: 'submitted' });
-        setShowFeedbackModal(false);
-        generateAnother();
+    function closeWordReportModal() {
+        setShowWordReportModal(false);
+        setWordReportStage('idle');
+        setWordReportInput('');
     }
-
-    // ── Word reports ──────────────────────────────────────────────────────────
 
     async function handleMissingWordSubmit() {
         const word = wordReportInput.trim().toUpperCase();
@@ -267,8 +356,8 @@ export default function GameClient({
         await submitWordReport({
             word,
             kind: 'missing',
-            start: puzzle.start,
-            target: puzzle.target,
+            start: activePuzzle.start,
+            target: activePuzzle.target,
             timestamp: new Date().toISOString(),
         });
         closeWordReportModal();
@@ -281,8 +370,8 @@ export default function GameClient({
         await submitWordReport({
             word,
             kind: 'bad',
-            start: puzzle.start,
-            target: puzzle.target,
+            start: activePuzzle.start,
+            target: activePuzzle.target,
             timestamp: new Date().toISOString(),
         });
         closeWordReportModal();
@@ -291,217 +380,185 @@ export default function GameClient({
 
     function handleWordReportKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
         if (e.key === 'Enter') handleMissingWordSubmit();
-        if (e.key === 'Escape') setWordReportStage('idle');
+        if (e.key === 'Escape') closeWordReportModal();
     }
 
-    function generateAnother() {
+    // ── New puzzle set flow ───────────────────────────────────────────────────
+
+    function handleNewSet() {
+        setNewSetRatings({});
+        setShowNewSetModal(true);
+    }
+
+    async function submitNewSetFeedback(skip: boolean) {
+        setShowNewSetModal(false);
+
+        if (!skip) {
+            const tierList = TIERS.filter((t) => newSetRatings[t]);
+            await Promise.all(
+                tierList.map((t) =>
+                    submitFeedback({
+                        start: activePuzzleSet[t].start,
+                        target: activePuzzleSet[t].target,
+                        optimalPathLength: activePuzzleSet[t].optimalPath.length - 1,
+                        movesTaken: state.puzzles[t].moves.length - 1,
+                        solved: state.puzzles[t].status === 'passed',
+                        rating: newSetRatings[t]!,
+                        reason: 'set-feedback',
+                        tier: t,
+                        timestamp: new Date().toISOString(),
+                    }),
+                ),
+            );
+        }
+
         try {
-            localStorage.removeItem(STORAGE_KEY);
+            localStorage.removeItem(STATE_KEY);
+            localStorage.removeItem(PUZZLE_KEY);
         } catch {}
         router.refresh();
     }
 
-    // Show modal if feedback not yet given, otherwise go straight to new puzzle
-    function handleNewPuzzle() {
-        if (feedback.stage === 'submitted') {
-            generateAnother();
-        } else {
-            setFeedbackModalContext('abandoned');
-            setShowFeedbackModal(true);
+    // ── Share ─────────────────────────────────────────────────────────────────
+
+    function buildShareText(): string {
+        const today = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+        const lines = [`Stepladder — ${today}`];
+        for (const tier of TIERS) {
+            const p = state.puzzles[tier];
+            const puzzle = activePuzzleSet[tier];
+            const shortest = puzzle.optimalPath.length - 1;
+            const emoji = TIER_EMOJI[tier];
+            if (p.status === 'passed') {
+                const taken = p.moves.length - 1;
+                const over = taken - shortest;
+                const resultStr = over === 0 ? `${taken}/${shortest}` : over > 0 ? `${taken}/${shortest} +${over}` : `${taken}/${shortest} ${over}`;
+                lines.push(`${emoji} ${TIER_LABELS[tier].padEnd(7)} ✓ ${resultStr}`);
+            } else if (p.status === 'failed') {
+                lines.push(`${emoji} ${TIER_LABELS[tier].padEnd(7)} ✗  (shortest: ${shortest})`);
+            } else {
+                lines.push(`${emoji} ${TIER_LABELS[tier].padEnd(7)} —`);
+            }
+        }
+        lines.push('stepladder.app');
+        return lines.join('\n');
+    }
+
+    async function handleShare() {
+        const text = buildShareText();
+        try {
+            await navigator.clipboard.writeText(text);
+            setShareCopied(true);
+            setTimeout(() => setShareCopied(false), 2000);
+        } catch {
+            // Fallback: select a textarea
         }
     }
 
-    function closeFeedbackModal() {
-        setShowFeedbackModal(false);
-        if (feedback.stage === 'asking') setFeedback({ stage: 'idle' });
+    // ── Summary results ───────────────────────────────────────────────────────
+
+    function shortestDisplay(tier: Tier): string {
+        const p = state.puzzles[tier];
+        const shortest = activePuzzleSet[tier].optimalPath.length - 1;
+        if (p.status === 'passed') {
+            const taken = p.moves.length - 1;
+            const over = taken - shortest;
+            if (over === 0) return `${taken} moves  (shortest: ${shortest})`;
+            if (over > 0) return `${taken} moves  (shortest: ${shortest}, +${over})`;
+            return `${taken} moves  (shortest: ${shortest}, ${over})`;
+        }
+        if (p.status === 'failed') return `failed  (shortest: ${shortest})`;
+        return '—';
     }
 
-    const reasons =
-        feedback.stage === 'asking'
-            ? feedback.rating === 'good'
-                ? GOOD_REASONS
-                : BAD_REASONS
-            : [];
+    // ── Summary screen ────────────────────────────────────────────────────────
 
-    return (
-        <>
-            {/* ── How to play modal ── */}
-            {showInstructions && (
-                <div
-                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-                    onClick={closeInstructions}>
-                    <div
-                        className="bg-[var(--background)] border rounded-lg p-6 max-w-sm w-full mx-4 flex flex-col gap-5"
-                        onClick={(e) => e.stopPropagation()}>
+    if (showSummary) {
+        return (
+            <>
+                {showNewSetModal && renderNewSetModal()}
+                {showWordReportModal && renderWordReportModal()}
+
+                <main className="w-full max-w-xl mx-auto px-4 flex flex-col h-dvh sm:h-auto sm:min-h-screen">
+                    <div className="flex-none pt-6 sm:pt-8 pb-4 flex flex-col gap-4">
                         <div className="flex items-center justify-between">
-                            <h2 className="text-lg font-bold">How to Play</h2>
+                            <div className="flex flex-col gap-0.5">
+                                <h1 className="text-4xl font-bold">Stepladder</h1>
+                                <p className="text-xs opacity-40 tracking-wide">a daily word ladder game</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() => { setInstructionsPage(1); setShowInstructions(true); }}
+                                    className="border rounded px-2.5 py-1.5 text-sm opacity-70 hover:opacity-100 transition-opacity">
+                                    How to Play
+                                </button>
+                                <ThemeToggle />
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="flex-1 flex flex-col justify-center gap-6 py-4">
+                        <p className="text-sm opacity-50 uppercase tracking-wide text-center">Today&apos;s set</p>
+
+                        <div className="flex flex-col gap-3 border rounded-xl p-5">
+                            {TIERS.map((tier) => (
+                                <div key={tier} className="flex items-center gap-3">
+                                    <span className="text-xl w-7 text-center">{TIER_EMOJI[tier]}</span>
+                                    <span className="font-semibold w-16">{TIER_LABELS[tier]}</span>
+                                    <span className="text-sm opacity-70">{shortestDisplay(tier)}</span>
+                                </div>
+                            ))}
+                        </div>
+
+                        <div className="flex flex-col gap-3 sm:flex-row">
                             <button
-                                onClick={closeInstructions}
-                                className="opacity-50 hover:opacity-100 text-lg leading-none px-1">
-                                ✕
+                                onClick={handleNewSet}
+                                className="border-2 border-yellow-400 rounded px-4 py-3 text-sm font-semibold w-full sm:flex-1">
+                                ↻ New puzzle set
+                            </button>
+                            <button
+                                onClick={handleShare}
+                                className="border-2 border-blue-400 rounded px-4 py-3 text-sm font-semibold w-full sm:flex-1">
+                                {shareCopied ? '✓ Copied!' : '⎘ Share'}
                             </button>
                         </div>
 
-                        <p className="text-sm opacity-70">
-                            Get from the start word to the target word — one
-                            letter at a time.
-                        </p>
-
-                        <div className="flex flex-col gap-1">
-                            <p className="text-sm font-semibold">
-                                The one-letter rule
-                            </p>
-                            <p className="text-sm opacity-70">
-                                Every move, change exactly one letter. The
-                                result must be a real word. That&apos;s it.
-                            </p>
-                        </div>
-
-                        <div className="flex flex-col gap-1 p-3 rounded-md border font-mono text-sm">
-                            <span className="opacity-40 text-xs mb-1">
-                                COLD → WARM
-                            </span>
-                            <span>COLD</span>
-                            <span className="opacity-40 text-xs">
-                                change L→R
-                            </span>
-                            <span>CORD</span>
-                            <span className="opacity-40 text-xs">
-                                change C→W
-                            </span>
-                            <span>WORD</span>
-                            <span className="opacity-40 text-xs">
-                                change O→A
-                            </span>
-                            <span>WARD</span>
-                            <span className="opacity-40 text-xs">
-                                change D→M
-                            </span>
-                            <span>WARM ✓</span>
-                        </div>
-
-                        <p className="text-sm opacity-70">
-                            Fewer moves is better — try to match the optimal
-                            path.
-                        </p>
-
                         <button
-                            onClick={closeInstructions}
-                            className="border rounded px-4 py-2 text-sm font-semibold w-full">
-                            Let&apos;s play →
+                            onClick={() => setShowWordReportModal(true)}
+                            className="border-2 border-orange-400 rounded px-3 py-2 text-sm w-full sm:w-auto sm:self-center opacity-60 hover:opacity-100 transition-opacity">
+                            Missing/Report Word
                         </button>
                     </div>
-                </div>
-            )}
+                </main>
 
-            {/* ── Post-puzzle feedback modal ── */}
-            {showFeedbackModal && (
-                <div
-                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-                    onClick={closeFeedbackModal}>
-                    <div
-                        className="bg-[var(--background)] border rounded-lg p-6 w-full max-w-sm mx-4 flex flex-col gap-5"
-                        onClick={(e) => e.stopPropagation()}>
-                        {feedback.stage !== 'asking' ? (
-                            <>
-                                {/* Rating screen */}
-                                <div className="flex items-start justify-between">
-                                    <div>
-                                        <h2 className="text-lg font-bold">
-                                            {feedbackModalContext === 'solved'
-                                                ? 'Nice work!'
-                                                : 'Before you go —'}
-                                        </h2>
-                                        <p className="text-sm opacity-60 mt-1">
-                                            {feedbackModalContext === 'solved'
-                                                ? `Solved in ${moves.length - 1} move${moves.length - 1 !== 1 ? 's' : ''}. How was this puzzle?`
-                                                : 'How was this puzzle so far?'}
-                                        </p>
-                                    </div>
-                                    <button
-                                        onClick={closeFeedbackModal}
-                                        className="opacity-40 hover:opacity-100 text-lg leading-none px-1 ml-2 mt-0.5">
-                                        ✕
-                                    </button>
-                                </div>
+                {showInstructions && renderInstructionsModal()}
+            </>
+        );
+    }
 
-                                <div className="flex flex-col gap-3">
-                                    <button
-                                        onClick={() => handleFeedback('good')}
-                                        className="border-2 border-green-500 rounded-xl px-4 py-4 text-sm font-semibold w-full text-left flex items-center gap-3 active:opacity-70">
-                                        <span className="text-2xl">👍</span>
-                                        <span>Good puzzle</span>
-                                    </button>
-                                    <button
-                                        onClick={() => handleFeedback('bad')}
-                                        className="border-2 border-red-500 rounded-xl px-4 py-4 text-sm font-semibold w-full text-left flex items-center gap-3 active:opacity-70">
-                                        <span className="text-2xl">👎</span>
-                                        <span>Bad puzzle</span>
-                                    </button>
-                                </div>
+    // ── Active puzzle screen ──────────────────────────────────────────────────
 
-                                <button
-                                    onClick={generateAnother}
-                                    className="text-sm opacity-40 hover:opacity-70 active:opacity-70 transition-opacity text-center w-full py-1">
-                                    Skip →
-                                </button>
-                            </>
-                        ) : (
-                            <>
-                                {/* Reason screen */}
-                                <div className="flex items-start justify-between">
-                                    <div>
-                                        <h2 className="text-lg font-bold">
-                                            {feedback.rating === 'good'
-                                                ? 'What made it good?'
-                                                : 'What made it bad?'}
-                                        </h2>
-                                        <p className="text-sm opacity-60 mt-1">
-                                            Pick one — it helps us improve.
-                                        </p>
-                                    </div>
-                                    <button
-                                        onClick={closeFeedbackModal}
-                                        className="opacity-40 hover:opacity-100 text-lg leading-none px-1 ml-2 mt-0.5">
-                                        ✕
-                                    </button>
-                                </div>
+    const inputBlocked = solved || failed || atLimit;
 
-                                <div className="grid grid-cols-2 gap-3">
-                                    {reasons.map((reason) => (
-                                        <button
-                                            key={reason}
-                                            onClick={() => handleReason(reason)}
-                                            className="border rounded-xl px-3 py-4 text-sm font-medium active:opacity-70">
-                                            {reason}
-                                        </button>
-                                    ))}
-                                </div>
-                            </>
-                        )}
-                    </div>
-                </div>
-            )}
+    return (
+        <>
+            {showInstructions && renderInstructionsModal()}
+            {showNewSetModal && renderNewSetModal()}
+            {showWordReportModal && renderWordReportModal()}
+            {resultModal && renderResultModal(resultModal)}
 
-            {/* ── Hints overlay ── */}
+            {/* ── Hints overlay — only closes via X ── */}
             {showHints && (
-                <div
-                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-                    onClick={() => setShowHints(false)}>
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
                     <div
                         className="bg-[var(--background)] border rounded-lg p-6 max-w-sm w-full mx-4 flex flex-col gap-4"
                         onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-between">
                             <div className="flex flex-col gap-0.5">
                                 <p className="font-semibold">
-                                    Valid moves from{' '}
-                                    <span className="font-mono">
-                                        {currentWord}
-                                    </span>
+                                    Valid moves from <span className="font-mono">{currentWord}</span>
                                 </p>
-                                <p className="text-xs opacity-40 uppercase tracking-wide">
-                                    Alpha — research only
-                                </p>
+                                {/* <p className="text-xs opacity-40 uppercase tracking-wide">Alpha — research only</p> */}
                             </div>
                             <button
                                 onClick={() => setShowHints(false)}
@@ -509,7 +566,6 @@ export default function GameClient({
                                 ✕
                             </button>
                         </div>
-
                         <div className="flex flex-wrap gap-2">
                             {validNextWords.map((word) => (
                                 <button
@@ -520,149 +576,23 @@ export default function GameClient({
                                 </button>
                             ))}
                         </div>
-
-                        <p className="text-xs opacity-40">
-                            Tap a word to fill the input, then Submit to play
-                            it.
-                        </p>
+                        <p className="text-xs opacity-40">Tap a word to fill the input, then Submit to play it.</p>
                     </div>
                 </div>
             )}
 
-            {/* ── Word report modal ── */}
-            {showWordReportModal && (
-                <div
-                    className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40"
-                    onClick={closeWordReportModal}>
-                    <div
-                        className="bg-[var(--background)] border border-b-0 sm:border rounded-t-2xl sm:rounded-lg p-6 pb-10 sm:pb-6 w-full sm:max-w-sm sm:mx-4 flex flex-col gap-5"
-                        onClick={(e) => e.stopPropagation()}>
-                        {wordReportStage === 'idle' && (
-                            <>
-                                <div className="flex items-center justify-between">
-                                    <h2 className="text-lg font-bold">Report a word</h2>
-                                    <button
-                                        onClick={closeWordReportModal}
-                                        className="opacity-50 hover:opacity-100 text-lg leading-none px-1">
-                                        ✕
-                                    </button>
-                                </div>
-                                <div className="flex flex-col gap-3">
-                                    <button
-                                        onClick={() => setWordReportStage('missing')}
-                                        className="border rounded-xl px-4 py-4 text-sm font-semibold w-full text-left flex flex-col gap-0.5 active:opacity-70">
-                                        <span>+ Missing word</span>
-                                        <span className="font-normal opacity-50">A word you expected to work</span>
-                                    </button>
-                                    <button
-                                        onClick={() => setWordReportStage('bad')}
-                                        className="border rounded-xl px-4 py-4 text-sm font-semibold w-full text-left flex flex-col gap-0.5 active:opacity-70">
-                                        <span>− Wrong word</span>
-                                        <span className="font-normal opacity-50">A word that shouldn&apos;t be there</span>
-                                    </button>
-                                </div>
-                            </>
-                        )}
-
-                        {wordReportStage === 'missing' && (
-                            <>
-                                <div className="flex items-center justify-between">
-                                    <h2 className="text-lg font-bold">Missing word</h2>
-                                    <button
-                                        onClick={closeWordReportModal}
-                                        className="opacity-50 hover:opacity-100 text-lg leading-none px-1">
-                                        ✕
-                                    </button>
-                                </div>
-                                <p className="text-sm opacity-60">What word did you expect to work?</p>
-                                <div className="flex gap-2">
-                                    <input
-                                        autoFocus
-                                        value={wordReportInput}
-                                        onChange={(e) => setWordReportInput(e.target.value)}
-                                        onKeyDown={handleWordReportKeyDown}
-                                        className="border rounded px-3 py-3 flex-1 bg-transparent font-mono uppercase text-base"
-                                        placeholder="WORD"
-                                        maxLength={puzzle.start.length}
-                                    />
-                                    <button
-                                        onClick={handleMissingWordSubmit}
-                                        className="border rounded px-4 py-3 text-sm font-semibold">
-                                        Submit
-                                    </button>
-                                </div>
-                                <button
-                                    onClick={() => setWordReportStage('idle')}
-                                    className="text-sm opacity-40 hover:opacity-70 transition-opacity text-center w-full py-1">
-                                    ← Back
-                                </button>
-                            </>
-                        )}
-
-                        {wordReportStage === 'bad' && (
-                            <>
-                                <div className="flex items-center justify-between">
-                                    <h2 className="text-lg font-bold">Wrong word</h2>
-                                    <button
-                                        onClick={closeWordReportModal}
-                                        className="opacity-50 hover:opacity-100 text-lg leading-none px-1">
-                                        ✕
-                                    </button>
-                                </div>
-                                <p className="text-sm opacity-60">Which word felt wrong?</p>
-                                <div className="flex gap-2">
-                                    <input
-                                        autoFocus
-                                        value={wordReportInput}
-                                        onChange={(e) => setWordReportInput(e.target.value)}
-                                        onKeyDown={(e) => {
-                                            if (e.key === 'Enter') handleBadWordSubmit();
-                                            if (e.key === 'Escape') closeWordReportModal();
-                                        }}
-                                        className="border rounded px-3 py-3 flex-1 bg-transparent font-mono uppercase text-base"
-                                        placeholder="WORD"
-                                        maxLength={puzzle.start.length}
-                                    />
-                                    <button
-                                        onClick={handleBadWordSubmit}
-                                        className="border rounded px-4 py-3 text-sm font-semibold">
-                                        Submit
-                                    </button>
-                                </div>
-                                <button
-                                    onClick={() => setWordReportStage('idle')}
-                                    className="text-sm opacity-40 hover:opacity-70 transition-opacity text-center w-full py-1">
-                                    ← Back
-                                </button>
-                            </>
-                        )}
-                    </div>
-                </div>
-            )}
-
-            {/*
-              * Three-section layout:
-              *   Top    — flex-none, always visible (header, start/target, shortest path)
-              *   Middle — flex-1 overflow-y-auto, scrollable (word chain, dictionary feedback)
-              *   Bottom — flex-none, always visible (message, input, new puzzle)
-              *
-              * h-dvh uses the dynamic viewport height, which correctly tracks
-              * iOS Safari's collapsing URL bar on both mobile and desktop.
-              */}
             <main className="w-full max-w-xl mx-auto px-4 flex flex-col h-dvh sm:h-auto sm:min-h-screen">
 
                 {/* ── Top: always visible ── */}
                 <div className="flex-none pt-6 sm:pt-8 pb-4 flex flex-col gap-4">
                     <div className="flex items-center justify-between">
                         <div className="flex flex-col gap-0.5">
-                            <h1 className="text-4xl font-bold">Steple</h1>
-                            <p className="text-xs opacity-40 tracking-wide">
-                                a daily word ladder game
-                            </p>
+                            <h1 className="text-4xl font-bold">Stepladder</h1>
+                            <p className="text-xs opacity-40 tracking-wide">a daily word ladder game</p>
                         </div>
                         <div className="flex items-center gap-2">
                             <button
-                                onClick={() => setShowInstructions(true)}
+                                onClick={() => { setInstructionsPage(1); setShowInstructions(true); }}
                                 className="border rounded px-2.5 py-1.5 text-sm opacity-70 hover:opacity-100 transition-opacity"
                                 title="How to play">
                                 How to Play
@@ -673,128 +603,463 @@ export default function GameClient({
 
                     <div className="flex items-center justify-center gap-6">
                         <div className="flex flex-col items-center gap-1">
-                            <span className="text-xs uppercase tracking-widest opacity-40">
-                                Start
-                            </span>
-                            <span className="text-4xl sm:text-4xl font-mono font-semibold">
-                                {puzzle.start}
-                            </span>
+                            <span className="text-xs uppercase tracking-widest opacity-40">Start</span>
+                            <span className="text-4xl font-mono font-semibold">{activePuzzle.start}</span>
                         </div>
                         <span className="text-lg opacity-30">→</span>
                         <div className="flex flex-col items-center gap-1">
-                            <span className="text-xs uppercase tracking-widest opacity-40">
-                                Target
-                            </span>
-                            <span className="text-4xl sm:text-4xl font-mono font-semibold">
-                                {puzzle.target}
-                            </span>
+                            <span className="text-xs uppercase tracking-widest opacity-40">Target</span>
+                            <span className="text-4xl font-mono font-semibold">{activePuzzle.target}</span>
                         </div>
                     </div>
 
-                    <div className="text-sm opacity-60 text-center">
-                        Shortest path: {puzzle.optimalPath.length - 1} moves
+                    {/* Status area — fixed below start/target, does not scroll */}
+                    <div className="flex flex-col gap-0.5 text-center">
+                        <span className="text-xs uppercase tracking-wide opacity-50">
+                            {TIER_EMOJI[activeTier]} Puzzle {TIER_NUMBER[activeTier]} of 3 · {TIER_LABELS[activeTier]}
+                        </span>
+                        <span className="text-sm opacity-60">
+                            Shortest path: {activePuzzle.optimalPath.length - 1} moves
+                        </span>
+                        {message && (
+                            <p className="text-sm text-red-500 dark:text-red-400 mt-1">{message}</p>
+                        )}
                     </div>
+
                 </div>
 
                 {/* ── Middle: scrollable word chain ── */}
                 <div
                     ref={scrollAreaRef}
-                    className="flex-1 overflow-y-auto flex flex-col gap-2 py-2 sm:flex-none sm:max-h-[35vh]">
+                    className="flex-1 overflow-y-auto flex flex-col gap-2 pb-2 sm:flex-none sm:max-h-[35vh]">
                     {moves.map((move, index) => {
                         const isLast = index === moves.length - 1;
                         const isSolvedTile = isLast && solved;
+                        const isFailedTile = isLast && failed;
+                        const isFlashing = index === flashTileIndex && !isSolvedTile;
                         return (
                             <div
                                 key={index}
                                 className={[
-                                    'border-2 rounded px-4 py-2 text-lg font-mono',
+                                    'border-2 rounded px-4 py-2 text-lg font-mono transition-colors duration-300',
                                     isSolvedTile
                                         ? 'border-green-500 text-green-600 dark:text-green-400'
+                                        : isFailedTile
+                                        ? 'border-red-500 text-red-600 dark:text-red-400'
+                                        : isFlashing
+                                        ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/40 animate-word-pop shadow-md shadow-blue-200 dark:shadow-blue-900'
                                         : 'border-blue-500',
-                                    isSolvedTile && solvedAnimating
-                                        ? 'animate-pop'
-                                        : '',
+                                    isSolvedTile && solvedAnimating ? 'animate-pop' : '',
                                 ].join(' ')}>
                                 {move}
-                                {isSolvedTile && (
-                                    <span className="ml-2 text-base">✓</span>
-                                )}
+                                {isSolvedTile && <span className="ml-2 text-base">✓</span>}
+                                {isFailedTile && <span className="ml-2 text-base">✗</span>}
                             </div>
                         );
                     })}
-
                 </div>
 
                 {/* ── Bottom: always visible controls ── */}
                 <div className="flex-none pt-4 pb-6 sm:pb-8 flex flex-col gap-4">
-                    {message && (
-                        <div
-                            className={`text-sm opacity-80 ${solved ? 'animate-fade-up font-semibold' : ''}`}>
-                            {message}
-                        </div>
-                    )}
 
                     {wordReportToast && (
                         <p className="text-sm opacity-70">{wordReportToast}</p>
                     )}
 
-                    {!solved && (
+                    {!inputBlocked && (
                         <>
-                        {/* Mobile-only input — fixed in controls, never moves */}
-                        <input
-                            value={input}
-                            onChange={(e) => setInput(e.target.value)}
-                            onKeyDown={handleKeyDown}
-                            className="sm:hidden border-2 rounded px-4 py-2 w-full bg-transparent font-mono uppercase text-lg"
-                            placeholder="Next word"
-                            maxLength={puzzle.start.length}
-                        />
-                        <div className="flex flex-col gap-4 items-center sm:items-stretch sm:flex-row sm:gap-2">
+                            {/* Mobile-only input */}
                             <input
                                 value={input}
                                 onChange={(e) => setInput(e.target.value)}
                                 onKeyDown={handleKeyDown}
-                                className="hidden sm:block sm:flex-1 sm:min-w-0 border rounded px-4 py-2 bg-transparent font-mono uppercase sm:text-lg"
+                                className="sm:hidden border-2 rounded px-4 py-2 w-full bg-transparent font-mono uppercase text-lg"
                                 placeholder="Next word"
-                                maxLength={puzzle.start.length}
-                                autoFocus
+                                maxLength={activePuzzle.start.length}
                             />
-                            <button
-                                onClick={() => submitMove()}
-                                className="border-2 border-green-500 rounded px-4 py-4 sm:py-2 w-full sm:w-auto sm:shrink-0">
-                                Submit
-                            </button>
-                            <button
-                                onClick={() => {
-                                    if (!hintConsumedForWord) {
-                                        setHintsUsed((n) => Math.min(n + 1, 2));
-                                        setHintConsumedForWord(true);
-                                    }
-                                    setShowHints((v) => !v);
-                                }}
-                                disabled={hintsUsed >= 2 && !hintConsumedForWord}
-                                className="border rounded px-4 py-3 sm:py-2 w-4/5 sm:w-auto sm:shrink-0 text-sm opacity-60 hover:opacity-100 transition-opacity disabled:opacity-25 disabled:cursor-not-allowed">
-                                Hint ×{Math.max(0, 2 - hintsUsed)}
-                            </button>
-                        </div>
+                            <div className="flex flex-col gap-4 items-center sm:items-stretch sm:flex-row sm:gap-2">
+                                <input
+                                    value={input}
+                                    onChange={(e) => setInput(e.target.value)}
+                                    onKeyDown={handleKeyDown}
+                                    className="hidden sm:block sm:flex-1 sm:min-w-0 border rounded px-4 py-2 bg-transparent font-mono uppercase sm:text-lg"
+                                    placeholder="Next word"
+                                    maxLength={activePuzzle.start.length}
+                                    autoFocus
+                                />
+                                <button
+                                    onClick={() => submitMove()}
+                                    className="border-2 border-green-500 rounded px-4 py-4 sm:py-2 w-full sm:w-auto sm:shrink-0">
+                                    Submit
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        if (!hintConsumedForWord) {
+                                            updateProgress(activeTier, {
+                                                hintsUsed: Math.min(progress.hintsUsed + 1, 2),
+                                                hintWord: currentWord,
+                                            });
+                                        }
+                                        setShowHints((v) => !v);
+                                    }}
+                                    disabled={progress.hintsUsed >= 2 && !hintConsumedForWord}
+                                    className="border rounded px-4 py-3 sm:py-2 w-4/5 sm:w-auto sm:shrink-0 text-sm opacity-60 hover:opacity-100 transition-opacity disabled:opacity-25 disabled:cursor-not-allowed">
+                                    Hint ×{Math.max(0, 2 - progress.hintsUsed)}
+                                </button>
+                            </div>
                         </>
                     )}
 
-                    {/* New Puzzle + Word Report — side by side on desktop, stacked on mobile */}
+                    {/* New puzzle set + Word report */}
                     <div className="flex flex-col gap-4 items-center sm:flex-row sm:justify-center">
                         <button
-                            onClick={handleNewPuzzle}
+                            onClick={handleNewSet}
                             className="border-2 border-yellow-400 rounded px-3 py-3 sm:py-2 text-sm w-3/5 sm:w-48">
-                            ↻ New puzzle
+                            ↻ New puzzle set
                         </button>
                         <button
                             onClick={() => setShowWordReportModal(true)}
                             className="border-2 border-orange-400 rounded px-3 py-3 sm:py-2 text-sm w-2/5 sm:w-48 opacity-60 hover:opacity-100 transition-opacity">
-                            Word Report
+                            Missing/Report Word
                         </button>
                     </div>
                 </div>
             </main>
         </>
     );
+
+    // ── Modal renderers (defined as functions to avoid early return issues) ───
+
+    function renderInstructionsModal() {
+        const dots = (
+            <div className="flex items-center justify-center gap-1.5">
+                {([1, 2, 3] as const).map((n) => (
+                    <button
+                        key={n}
+                        onClick={() => setInstructionsPage(n)}
+                        className={`w-1.5 h-1.5 rounded-full transition-all ${instructionsPage === n ? 'bg-current opacity-70 w-3' : 'bg-current opacity-20'}`}
+                    />
+                ))}
+            </div>
+        );
+
+        const pages = {
+            1: (
+                <>
+                    <div className="flex items-start justify-between">
+                        <h2 className="text-lg font-bold">How to Play</h2>
+                        <button onClick={closeInstructions} className="opacity-40 hover:opacity-100 text-lg leading-none px-1 mt-0.5">✕</button>
+                    </div>
+                    <p className="text-sm opacity-70">
+                        Get from the <span className="font-semibold opacity-100">start</span> word to the <span className="font-semibold opacity-100">target</span> word — one letter change at a time.
+                    </p>
+                    <div className="flex flex-col gap-1 p-4 rounded-xl border font-mono text-sm">
+                        <span className="opacity-40 text-xs mb-1 font-sans">COLD → WARM</span>
+                        <span>COLD</span>
+                        <span className="opacity-40 text-xs font-sans">change L → R</span>
+                        <span>CORD</span>
+                        <span className="opacity-40 text-xs font-sans">change C → W</span>
+                        <span>WORD</span>
+                        <span className="opacity-40 text-xs font-sans">change O → A</span>
+                        <span>WARD</span>
+                        <span className="opacity-40 text-xs font-sans">change D → M</span>
+                        <span className="text-green-600 dark:text-green-400">WARM ✓</span>
+                    </div>
+                    {dots}
+                    <button onClick={() => setInstructionsPage(2)} className="border rounded px-4 py-2 text-sm font-semibold w-full">
+                        Next →
+                    </button>
+                </>
+            ),
+            2: (
+                <>
+                    <div className="flex items-start justify-between">
+                        <h2 className="text-lg font-bold">The Rules</h2>
+                        <button onClick={closeInstructions} className="opacity-40 hover:opacity-100 text-lg leading-none px-1 mt-0.5">✕</button>
+                    </div>
+                    <div className="flex flex-col gap-3 text-sm">
+                        <div className="flex gap-3">
+                            <span className="text-green-500 font-bold mt-0.5">①</span>
+                            <p className="opacity-70">Change <span className="font-semibold opacity-100">exactly one letter</span> per move — any position, any letter.</p>
+                        </div>
+                        <div className="flex gap-3">
+                            <span className="text-green-500 font-bold mt-0.5">②</span>
+                            <p className="opacity-70">The result must be a <span className="font-semibold opacity-100">real word</span>.</p>
+                        </div>
+                        <div className="flex gap-3">
+                            <span className="text-green-500 font-bold mt-0.5">③</span>
+                            <p className="opacity-70">Fewer moves is better — try to match the <span className="font-semibold opacity-100">shortest possible path</span>.</p>
+                        </div>
+                    </div>
+                    <div className="flex flex-col gap-2 p-3 rounded-xl border text-sm font-mono">
+                        <div className="flex items-center gap-2"><span className="text-green-500">✓</span><span>COLD → CORD</span><span className="font-sans text-xs opacity-40">(L→R, one change)</span></div>
+                        <div className="flex items-center gap-2"><span className="text-red-500">✗</span><span>COLD → COAT</span><span className="font-sans text-xs opacity-40">(two changes)</span></div>
+                        <div className="flex items-center gap-2"><span className="text-red-500">✗</span><span>COLD → CLOD</span><span className="font-sans text-xs opacity-40">(rearranged)</span></div>
+                    </div>
+                    {dots}
+                    <div className="flex gap-3">
+                        <button onClick={() => setInstructionsPage(1)} className="border rounded px-4 py-2 text-sm w-full opacity-60 hover:opacity-100">← Back</button>
+                        <button onClick={() => setInstructionsPage(3)} className="border rounded px-4 py-2 text-sm font-semibold w-full">Next →</button>
+                    </div>
+                </>
+            ),
+            3: (
+                <>
+                    <div className="flex items-start justify-between">
+                        <h2 className="text-lg font-bold">Daily Set</h2>
+                        <button onClick={closeInstructions} className="opacity-40 hover:opacity-100 text-lg leading-none px-1 mt-0.5">✕</button>
+                    </div>
+                    <p className="text-sm opacity-70">Each day you get <span className="font-semibold opacity-100">three puzzles</span>, getting harder:</p>
+                    <div className="flex flex-col gap-2.5">
+                        <div className="flex items-center gap-3">
+                            <span className="text-xl">🟢</span>
+                            <div>
+                                <p className="text-sm font-semibold">Easy</p>
+                                <p className="text-xs opacity-50">4-move shortest path</p>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <span className="text-xl">🟡</span>
+                            <div>
+                                <p className="text-sm font-semibold">Medium</p>
+                                <p className="text-xs opacity-50">5-move shortest path</p>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <span className="text-xl">🔴</span>
+                            <div>
+                                <p className="text-sm font-semibold">Hard</p>
+                                <p className="text-xs opacity-50">6+ move shortest path</p>
+                            </div>
+                        </div>
+                    </div>
+                    <p className="text-sm opacity-60">Share your results after finishing all three. You can&apos;t do better than the shortest path — but you can match it.</p>
+                    {dots}
+                    <div className="flex gap-3">
+                        <button onClick={() => setInstructionsPage(2)} className="border rounded px-4 py-2 text-sm w-full opacity-60 hover:opacity-100">← Back</button>
+                        <button onClick={closeInstructions} className="border-2 border-green-500 rounded px-4 py-2 text-sm font-semibold w-full">Let&apos;s play →</button>
+                    </div>
+                </>
+            ),
+        };
+
+        return (
+            <div
+                className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+                onClick={closeInstructions}>
+                <div
+                    className="bg-[var(--background)] border rounded-2xl p-6 max-w-sm w-full mx-4 flex flex-col gap-5"
+                    onClick={(e) => e.stopPropagation()}>
+                    {pages[instructionsPage]}
+                </div>
+            </div>
+        );
+    }
+
+    function renderResultModal(modal: { passed: boolean; movesTaken: number; shortestPath: number }) {
+        const over = modal.movesTaken - modal.shortestPath;
+        const resultLine = modal.passed
+            ? over === 0
+                ? `${modal.movesTaken} moves — matched the shortest path!`
+                : `${modal.movesTaken} moves (shortest path: ${modal.shortestPath}, +${over})`
+            : `Shortest path: ${modal.shortestPath} moves`;
+
+        return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+                <div className="bg-[var(--background)] border rounded-2xl p-8 w-full max-w-sm mx-4 flex flex-col items-center gap-5">
+                    <span className={`text-5xl ${modal.passed ? 'text-green-500' : 'text-red-500'}`}>
+                        {modal.passed ? '✓' : '✗'}
+                    </span>
+                    <div className="text-center flex flex-col gap-1">
+                        <p className="text-lg font-bold">{modal.passed ? 'Solved!' : 'Out of moves'}</p>
+                        <p className="text-sm opacity-60">{resultLine}</p>
+                    </div>
+
+                    {/* Draining progress bar */}
+                    <div className="w-full h-1 bg-black/10 dark:bg-white/10 rounded overflow-hidden">
+                        <div className={`h-full rounded ${modal.passed ? 'bg-green-500 animate-drain-pass' : 'bg-red-500 animate-drain-fail'}`} />
+                    </div>
+
+                    <button
+                        onClick={() => {
+                            if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
+                            advance();
+                        }}
+                        className="text-sm opacity-50 hover:opacity-100 transition-opacity">
+                        Next →
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
+    function renderNewSetModal() {
+        const anyCompleted = TIERS.some(
+            (t) => state.puzzles[t].status === 'passed' || state.puzzles[t].status === 'failed',
+        );
+
+        return (
+            <div
+                className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+                onClick={() => setShowNewSetModal(false)}>
+                <div
+                    className="bg-[var(--background)] border rounded-lg p-6 w-full max-w-sm mx-4 flex flex-col gap-5"
+                    onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-start justify-between">
+                        <div>
+                            <h2 className="text-lg font-bold">New puzzle set?</h2>
+                            <p className="text-sm opacity-60 mt-1">
+                                {anyCompleted ? 'Rate the puzzles you played — or skip.' : 'Your progress will be lost.'}
+                            </p>
+                        </div>
+                        <button
+                            onClick={() => setShowNewSetModal(false)}
+                            className="opacity-40 hover:opacity-100 text-lg leading-none px-1 ml-2 mt-0.5">
+                            ✕
+                        </button>
+                    </div>
+
+                    {anyCompleted && (
+                        <div className="flex flex-col gap-3">
+                            {TIERS.map((tier) => {
+                                const status = state.puzzles[tier].status;
+                                const isComplete = status === 'passed' || status === 'failed';
+                                return (
+                                    <div key={tier} className="flex items-center justify-between">
+                                        <span className="text-sm font-medium flex items-center gap-2">
+                                            <span>{TIER_EMOJI[tier]}</span>
+                                            <span>{TIER_LABELS[tier]}</span>
+                                        </span>
+                                        {isComplete ? (
+                                            <div className="flex gap-2">
+                                                {(['good', 'bad'] as FeedbackRating[]).map((rating) => (
+                                                    <button
+                                                        key={rating}
+                                                        onClick={() =>
+                                                            setNewSetRatings((prev) => ({
+                                                                ...prev,
+                                                                [tier]: prev[tier] === rating ? undefined : rating,
+                                                            }))
+                                                        }
+                                                        className={[
+                                                            'border rounded-lg px-3 py-2 text-lg transition-all',
+                                                            newSetRatings[tier] === rating
+                                                                ? rating === 'good'
+                                                                    ? 'border-green-500 bg-green-500/10'
+                                                                    : 'border-red-500 bg-red-500/10'
+                                                                : 'opacity-40 hover:opacity-70',
+                                                        ].join(' ')}>
+                                                        {rating === 'good' ? '👍' : '👎'}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <span className="text-xs opacity-30 italic">not played</span>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+
+                    <div className="flex gap-3 pt-1">
+                        <button
+                            onClick={() => setShowNewSetModal(false)}
+                            className="text-sm opacity-40 hover:opacity-70 transition-opacity flex-1 py-2 text-center">
+                            Cancel
+                        </button>
+                        <button
+                            onClick={() => submitNewSetFeedback(!anyCompleted)}
+                            className="border-2 border-yellow-400 rounded px-4 py-2 text-sm font-semibold flex-1">
+                            {anyCompleted ? 'Submit & continue' : 'Continue'}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    function renderWordReportModal() {
+        return (
+            <div
+                className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40"
+                onClick={closeWordReportModal}>
+                <div
+                    className="bg-[var(--background)] border border-b-0 sm:border rounded-t-2xl sm:rounded-lg p-6 pb-10 sm:pb-6 w-full sm:max-w-sm sm:mx-4 flex flex-col gap-5"
+                    onClick={(e) => e.stopPropagation()}>
+                    {wordReportStage === 'idle' && (
+                        <>
+                            <div className="flex items-center justify-between">
+                                <h2 className="text-lg font-bold">Report a word</h2>
+                                <button onClick={closeWordReportModal} className="opacity-50 hover:opacity-100 text-lg leading-none px-1">✕</button>
+                            </div>
+                            <div className="flex flex-col gap-3">
+                                <button
+                                    onClick={() => setWordReportStage('missing')}
+                                    className="border rounded-xl px-4 py-4 text-sm font-semibold w-full text-left flex flex-col gap-0.5 active:opacity-70">
+                                    <span>+ Missing word</span>
+                                    <span className="font-normal opacity-50">A word that should be in the game</span>
+                                </button>
+                                <button
+                                    onClick={() => setWordReportStage('bad')}
+                                    className="border rounded-xl px-4 py-4 text-sm font-semibold w-full text-left flex flex-col gap-0.5 active:opacity-70">
+                                    <span>− Report word</span>
+                                    <span className="font-normal opacity-50">A word that should not be in the game</span>
+                                </button>
+                            </div>
+                        </>
+                    )}
+
+                    {wordReportStage === 'missing' && (
+                        <>
+                            <div className="flex items-center justify-between">
+                                <h2 className="text-lg font-bold">Missing word</h2>
+                                <button onClick={closeWordReportModal} className="opacity-50 hover:opacity-100 text-lg leading-none px-1">✕</button>
+                            </div>
+                            <p className="text-sm opacity-60">What word did you expect to work?</p>
+                            <div className="flex gap-2">
+                                <input
+                                    autoFocus
+                                    value={wordReportInput}
+                                    onChange={(e) => setWordReportInput(e.target.value)}
+                                    onKeyDown={handleWordReportKeyDown}
+                                    className="border rounded px-3 py-3 flex-1 bg-transparent font-mono uppercase text-base"
+                                    placeholder="WORD"
+                                    maxLength={activePuzzle.start.length}
+                                />
+                                <button onClick={handleMissingWordSubmit} className="border rounded px-4 py-3 text-sm font-semibold">Submit</button>
+                            </div>
+                            <button onClick={() => setWordReportStage('idle')} className="text-sm opacity-40 hover:opacity-70 transition-opacity text-center w-full py-1">← Back</button>
+                        </>
+                    )}
+
+                    {wordReportStage === 'bad' && (
+                        <>
+                            <div className="flex items-center justify-between">
+                                <h2 className="text-lg font-bold">Wrong word</h2>
+                                <button onClick={closeWordReportModal} className="opacity-50 hover:opacity-100 text-lg leading-none px-1">✕</button>
+                            </div>
+                            <p className="text-sm opacity-60">Which word felt wrong?</p>
+                            <div className="flex gap-2">
+                                <input
+                                    autoFocus
+                                    value={wordReportInput}
+                                    onChange={(e) => setWordReportInput(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') handleBadWordSubmit();
+                                        if (e.key === 'Escape') closeWordReportModal();
+                                    }}
+                                    className="border rounded px-3 py-3 flex-1 bg-transparent font-mono uppercase text-base"
+                                    placeholder="WORD"
+                                    maxLength={activePuzzle.start.length}
+                                />
+                                <button onClick={handleBadWordSubmit} className="border rounded px-4 py-3 text-sm font-semibold">Submit</button>
+                            </div>
+                            <button onClick={() => setWordReportStage('idle')} className="text-sm opacity-40 hover:opacity-70 transition-opacity text-center w-full py-1">← Back</button>
+                        </>
+                    )}
+                </div>
+            </div>
+        );
+    }
 }

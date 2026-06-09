@@ -1,108 +1,252 @@
+/**
+ * Puzzle set generation for Stepladder.
+ *
+ * Returns a PuzzleSet of three tiered puzzles (easy → medium → hard).
+ *
+ * Mode is controlled by DAILY_MODE:
+ *   false (current) — unlimited mode: random set from the scored pair pool
+ *   true  (future)  — daily mode: deterministic set from daily-schedule.json
+ *
+ * To flip to daily mode: set DAILY_MODE = true and populate daily-schedule.json.
+ */
+
 import fs from 'fs';
 import path from 'path';
-import { loadPuzzleWords, createWordSet, getNeighbors } from '@repo/dictionary';
+import { loadPuzzleWords, createWordSet, loadCommonWords } from '@repo/dictionary';
 import { bfsShortestPath, computeNeighborGraph } from '@repo/game-engine';
-import { loadWordPairs } from '@/lib/loadWordPairs';
 
-function loadBlocklist(file: string): Set<string> {
-    const filePath = path.join(process.cwd(), '../../games/ladder/data', file);
-    return new Set(
-        fs
-            .readFileSync(filePath, 'utf-8')
-            .split('\n')
-            .map((l) => l.trim())
-            .filter((l) => l.length > 0 && !l.startsWith('#')),
-    );
+// ── Config ─────────────────────────────────────────────────────────────────────
+
+const DAILY_MODE = false;
+
+// ── Types ──────────────────────────────────────────────────────────────────────
+
+export type Tier = 'easy' | 'medium' | 'hard';
+
+export type TieredPuzzle = {
+    tier: Tier;
+    start: string;
+    target: string;
+    optimalPath: string[];
+    neighborGraph: Record<string, string[]>;
+    moveLimit: number;
+};
+
+export type PuzzleSet = {
+    /** Stable identity for this set — used as localStorage key. */
+    id: string;
+    easy: TieredPuzzle;
+    medium: TieredPuzzle;
+    hard: TieredPuzzle;
+};
+
+// Move limit = optimal path length + buffer. More buffer → more forgiving.
+const MOVE_LIMIT_BUFFER: Record<Tier, number> = {
+    easy:   3,  // 4-move optimal → 7 guesses
+    medium: 3,  // 5-move optimal → 8 guesses
+    hard:   2,  // 6-move optimal → 8 guesses
+};
+
+// ── Public entry point ─────────────────────────────────────────────────────────
+
+export function getPuzzleSet(): PuzzleSet {
+    return DAILY_MODE ? getDailyPuzzleSet() : getRandomPuzzleSet();
 }
 
-function randomItem<T>(items: T[]): T {
-    return items[Math.floor(Math.random() * items.length)];
+// ── Shared helpers ─────────────────────────────────────────────────────────────
+
+function buildTieredPuzzle(tier: Tier, start: string, target: string, wordSet: Set<string>): TieredPuzzle {
+    const optimalPath = bfsShortestPath(start, target, wordSet);
+    if (!optimalPath) throw new Error(`No path from ${start} to ${target}`);
+    return {
+        tier,
+        start,
+        target,
+        optimalPath,
+        neighborGraph: computeNeighborGraph(start, wordSet),
+        moveLimit: optimalPath.length - 1 + MOVE_LIMIT_BUFFER[tier],
+    };
 }
 
-function shuffle<T>(items: T[]): T[] {
-    return [...items].sort(() => Math.random() - 0.5);
+function setPairId(easy: [string, string], med: [string, string], hard: [string, string]): string {
+    return `${easy[0]}-${easy[1]}|${med[0]}-${med[1]}|${hard[0]}-${hard[1]}`;
 }
 
-/** COLD→WARM quality thresholds — must match validateWordPairs.ts */
-const MIN_MOVES = 4;
-const MAX_MOVES = 5;
-const MIN_BRANCHING = 7;
-const MIN_AVG_BRANCHING = 7;
-
-/** Letters banned from puzzle start/target words. */
-const RARE_LETTERS = new Set(['J', 'Z', 'V']);
-
-function meetsQuality(
-    p: string[],
-    wordSet: Set<string>,
-): boolean {
-    const moves = p.length - 1;
-    if (moves < MIN_MOVES || moves > MAX_MOVES) return false;
-
-    const branches = p.map((w) => getNeighbors(w, wordSet).length);
-    const avg = branches.reduce((s, n) => s + n, 0) / branches.length;
-    const min = Math.min(...branches);
-
-    return min >= MIN_BRANCHING && avg >= MIN_AVG_BRANCHING;
+function randomItem<T>(arr: T[]): T {
+    return arr[Math.floor(Math.random() * arr.length)];
 }
 
-export function generatePuzzle() {
-    const allWords = loadPuzzleWords();
-    const wordSet = createWordSet(allWords);
+function shuffle<T>(arr: T[]): T[] {
+    return [...arr].sort(() => Math.random() - 0.5);
+}
 
-    const blockedWords = loadBlocklist('blocked-words.txt');
-    const blockedPairs = loadBlocklist('blocked-pairs.txt');
+// ── Random mode ────────────────────────────────────────────────────────────────
 
-    function isPairBlocked(s: string, t: string): boolean {
-        return (
-            blockedWords.has(s) ||
-            blockedWords.has(t) ||
-            blockedPairs.has(`${s},${t}`) ||
-            blockedPairs.has(`${t},${s}`)
-        );
+const TIER_MOVE_RANGE: Record<Tier, [number, number]> = {
+    easy:   [4, 4],
+    medium: [5, 5],
+    hard:   [6, 7],
+};
+
+// Module-level cache — the pair pool is read once per server process.
+let _pairPoolCache: Record<Tier, [string, string][]> | null = null;
+
+/** Load the scored pair pool, return pairs grouped by tier. Cached after first read. */
+function loadPairPool(): Record<Tier, [string, string][]> {
+    if (_pairPoolCache) return _pairPoolCache;
+
+    const poolPath = path.join(process.cwd(), '../../games/ladder/data/pair-pool.txt');
+    const pool: Record<Tier, [string, string][]> = { easy: [], medium: [], hard: [] };
+
+    if (!fs.existsSync(poolPath)) {
+        _pairPoolCache = pool;
+        return pool;
     }
 
-    // ── Primary path: curated pairs ──────────────────────────────────────────
-    const pairs = loadWordPairs().filter(
-        ([s, t]) => wordSet.has(s) && wordSet.has(t) && !isPairBlocked(s, t),
-    );
+    for (const line of fs.readFileSync(poolPath, 'utf-8').split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
 
-    for (const [start, target] of shuffle(pairs)) {
+        const [pairPart] = trimmed.split('#');
+        const [startRaw, targetRaw] = (pairPart ?? '').split(',');
+        const start = startRaw?.trim().toUpperCase();
+        const target = targetRaw?.trim().toUpperCase();
+        if (!start || !target) continue;
+
+        // Parse tier from the comment
+        const tierMatch = trimmed.match(/tier=(easy|medium|hard)/);
+        const tier = tierMatch?.[1] as Tier | undefined;
+        if (tier && pool[tier]) pool[tier].push([start, target]);
+    }
+
+    _pairPoolCache = pool;
+    return pool;
+}
+
+/**
+ * Fallback: find a pair at the right move count by random BFS search.
+ * Used when the pair pool is empty for a given tier.
+ */
+function findRandomPairForTier(
+    tier: Tier,
+    wordSet: Set<string>,
+    candidates: string[],
+    blockedWords: Set<string>,
+): [string, string] {
+    const [minMoves, maxMoves] = TIER_MOVE_RANGE[tier];
+    const shuffled = shuffle(candidates);
+    const MAX = 10_000;
+
+    for (let i = 0; i < MAX; i++) {
+        const start = shuffled[i % shuffled.length];
+        const target = shuffled[(i + Math.floor(shuffled.length / 3)) % shuffled.length];
+        if (start === target) continue;
+        if (blockedWords.has(start) || blockedWords.has(target)) continue;
+
         const p = bfsShortestPath(start, target, wordSet);
-        if (p && meetsQuality(p, wordSet)) {
-            return {
-                start,
-                target,
-                optimalPath: p,
-                neighborGraph: computeNeighborGraph(start, wordSet),
-            };
+        if (!p) continue;
+
+        const moves = p.length - 1;
+        if (moves >= minMoves && moves <= maxMoves) return [start, target];
+    }
+
+    // Last resort: return first pair from word-pairs.txt that fits
+    return findFallbackPairFromCurated(tier);
+}
+
+function findFallbackPairFromCurated(tier: Tier): [string, string] {
+    const [minMoves, maxMoves] = TIER_MOVE_RANGE[tier];
+    const pairsPath = path.join(process.cwd(), '../../games/ladder/data/word-pairs.txt');
+
+    try {
+        const wordSet = createWordSet(loadPuzzleWords());
+        const lines = fs.readFileSync(pairsPath, 'utf-8').split('\n');
+        for (const line of shuffle(lines)) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith('#')) continue;
+            const [a, b] = trimmed.split(',');
+            const start = a?.trim().toUpperCase();
+            const target = b?.trim().split(/\s/)[0].toUpperCase();
+            if (!start || !target) continue;
+            const p = bfsShortestPath(start, target, wordSet);
+            if (!p) continue;
+            const moves = p.length - 1;
+            if (moves >= minMoves && moves <= maxMoves) return [start, target];
+        }
+    } catch {}
+
+    // Absolute last resort — COLD→WARM is always a valid easy pair
+    return ['COLD', 'WARM'];
+}
+
+function getRandomPuzzleSet(): PuzzleSet {
+    const allWords = loadPuzzleWords();
+    const wordSet = createWordSet(allWords);
+    // Puzzle endpoints must be familiar words — full wordSet is still used for graph traversal.
+    const commonWords = loadCommonWords();
+    const candidates = allWords.filter((w) => w.length === 4 && commonWords.has(w));
+
+    const blockedWordsPath = path.join(process.cwd(), '../../games/ladder/data/blocked-words.txt');
+    const blockedWords = new Set<string>();
+    try {
+        fs.readFileSync(blockedWordsPath, 'utf-8')
+            .split('\n')
+            .map((l) => l.trim().toUpperCase())
+            .filter((l) => l.length > 0 && !l.startsWith('#'))
+            .forEach((w) => blockedWords.add(w));
+    } catch {}
+
+    const pool = loadPairPool();
+    const tiers: Tier[] = ['easy', 'medium', 'hard'];
+    const chosen: Record<Tier, [string, string]> = {} as Record<Tier, [string, string]>;
+
+    for (const tier of tiers) {
+        if (pool[tier].length > 0) {
+            chosen[tier] = randomItem(pool[tier]);
+        } else {
+            chosen[tier] = findRandomPairForTier(tier, wordSet, candidates, blockedWords);
         }
     }
 
-    // ── Fallback: random generation (research / before pairs are curated) ────
-    const candidates = allWords.filter(
-        (w) =>
-            w.length === 4 &&
-            ![...w].some((c) => RARE_LETTERS.has(c)) &&
-            !blockedWords.has(w),
-    );
+    return {
+        id: setPairId(chosen.easy, chosen.medium, chosen.hard),
+        easy:   buildTieredPuzzle('easy',   chosen.easy[0],   chosen.easy[1],   wordSet),
+        medium: buildTieredPuzzle('medium', chosen.medium[0], chosen.medium[1], wordSet),
+        hard:   buildTieredPuzzle('hard',   chosen.hard[0],   chosen.hard[1],   wordSet),
+    };
+}
 
-    while (true) {
-        const start = randomItem(candidates);
-        const target = randomItem(candidates);
+// ── Daily mode ─────────────────────────────────────────────────────────────────
 
-        if (start === target) continue;
-        if (isPairBlocked(start, target)) continue;
+type DailyScheduleEntry = {
+    easy:   [string, string];
+    medium: [string, string];
+    hard:   [string, string];
+};
 
-        const p = bfsShortestPath(start, target, wordSet);
+function getDailyPuzzleSet(): PuzzleSet {
+    const schedulePath = path.join(process.cwd(), '../../games/ladder/data/daily-schedule.json');
+    const today = new Date().toISOString().split('T')[0]; // 'YYYY-MM-DD' UTC
 
-        if (!p || !meetsQuality(p, wordSet)) continue;
+    let entry: DailyScheduleEntry | undefined;
+    try {
+        const schedule = JSON.parse(fs.readFileSync(schedulePath, 'utf-8')) as Record<string, DailyScheduleEntry>;
+        entry = schedule[today];
+    } catch {}
 
-        return {
-            start,
-            target,
-            optimalPath: p,
-            neighborGraph: computeNeighborGraph(start, wordSet),
-        };
+    if (!entry) {
+        // No schedule entry for today — fall back to random
+        console.warn(`[stepladder] No daily schedule entry for ${today}, falling back to random set`);
+        return getRandomPuzzleSet();
     }
+
+    const allWords = loadPuzzleWords();
+    const wordSet = createWordSet(allWords);
+
+    return {
+        id: setPairId(entry.easy, entry.medium, entry.hard),
+        easy:   buildTieredPuzzle('easy',   entry.easy[0],   entry.easy[1],   wordSet),
+        medium: buildTieredPuzzle('medium', entry.medium[0], entry.medium[1], wordSet),
+        hard:   buildTieredPuzzle('hard',   entry.hard[0],   entry.hard[1],   wordSet),
+    };
 }
