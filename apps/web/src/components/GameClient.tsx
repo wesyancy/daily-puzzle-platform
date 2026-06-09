@@ -316,11 +316,15 @@ export default function GameClient({ puzzleSet }: { puzzleSet: PuzzleSet }) {
         setInput('');
         setShowHints(false);
 
-        // Flash the new tile briefly
+        // Two-frame approach: let the new tile render first, then add the animation
+        // class in the next event loop tick. This mirrors how animate-pop works on
+        // the solved tile (via useEffect) and ensures CSS animation fires reliably.
         const newIdx = nextMoves.length - 1;
-        setFlashTileIndex(newIdx);
         if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
-        flashTimerRef.current = setTimeout(() => setFlashTileIndex(-1), 500);
+        setTimeout(() => {
+            setFlashTileIndex(newIdx);
+            flashTimerRef.current = setTimeout(() => setFlashTileIndex(-1), 500);
+        }, 0);
 
         if (!nowSolved) {
             setMessage('');
