@@ -236,7 +236,11 @@ function main(): void {
     let cursor = startDate;
     let safety = 0;
 
-    while (generated < DAYS && safety < DAYS * 5) {
+    // Cap on calendar days scanned, not on --days requested — existing entries
+    // can be sparse (e.g. refilling a few scattered gaps far apart), so the scan
+    // must be able to walk past a long contiguous run of already-filled dates.
+    const MAX_DAYS_SCANNED = 730;
+    while (generated < DAYS && safety < MAX_DAYS_SCANNED) {
         safety++;
 
         if (schedule[cursor] || newEntries[cursor]) {
