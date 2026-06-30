@@ -57,16 +57,16 @@
   },
   "2026-07-04": {
     "easy": [
-      "SEND",
-      "PEAR"
+      "FLAG",
+      "STAR"
     ],
     "medium": [
-      "BEAT",
-      "CAPE"
+      "BELL",
+      "FREE"
     ],
     "hard": [
-      "BURY",
-      "FLAP"
+      "DRUM",
+      "BANG"
     ]
   },
   "2026-07-05": {
