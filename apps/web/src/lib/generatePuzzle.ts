@@ -3,11 +3,12 @@
  *
  * Returns a PuzzleSet of three tiered puzzles (easy → medium → hard).
  *
- * Mode is controlled by DAILY_MODE:
- *   false (current) — unlimited mode: random set from the scored pair pool
- *   true  (future)  — daily mode: deterministic set from daily-schedule.json
+ * Mode is controlled by DAILY_MODE, read from the DAILY_MODE env var:
+ *   unset/false — unlimited mode: random set from the scored pair pool
+ *   'true'      — daily mode: deterministic set from daily-schedule.json
  *
- * To flip to daily mode: set DAILY_MODE = true and populate daily-schedule.json.
+ * Set per-environment in Vercel project settings (Production=true, Preview/Dev unset)
+ * so production locks to one-a-day while preview deployments stay unlimited for testing.
  */
 
 import fs from 'fs';
@@ -17,7 +18,15 @@ import { bfsShortestPath, computeNeighborGraph } from '@repo/game-engine';
 
 // ── Config ─────────────────────────────────────────────────────────────────────
 
-const DAILY_MODE = false;
+// Explicit opt-in: a missing/misconfigured env var fails safe to unlimited mode
+// rather than accidentally locking production into daily mode.
+const DAILY_MODE = process.env.DAILY_MODE === 'true';
+
+// Single fixed reference timezone for the daily rollover (same convention as NYT
+// Wordle) — every player gets the new puzzle at midnight here, not their own local
+// midnight, since true per-player local rollover would require moving puzzle
+// generation to the client.
+const DAILY_ROLLOVER_TZ = 'America/New_York';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -224,9 +233,14 @@ type DailyScheduleEntry = {
     hard:   [string, string];
 };
 
+// 'en-CA' locale formats Intl dates as 'YYYY-MM-DD', matching the schedule's key format.
+function getTodayKey(): string {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: DAILY_ROLLOVER_TZ }).format(new Date());
+}
+
 function getDailyPuzzleSet(): PuzzleSet {
     const schedulePath = path.join(process.cwd(), '../../games/ladder/data/daily-schedule.json');
-    const today = new Date().toISOString().split('T')[0]; // 'YYYY-MM-DD' UTC
+    const today = getTodayKey(); // 'YYYY-MM-DD' in DAILY_ROLLOVER_TZ
 
     let entry: DailyScheduleEntry | undefined;
     try {

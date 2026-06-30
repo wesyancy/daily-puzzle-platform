@@ -10,6 +10,38 @@ BACH
 CARL
 CORY
 LARS
+HIST
+CHAD
+SITH
+TONY
+TYNE
+ARES
+TATE
+HONG
+CARR
+YANG
+HOWE
+LANG
 
 # Drug / inappropriate
 METH
+
+# Always inappropriate as a puzzle word, regardless of pairing (unlike
+# blocked-pairs.txt entries such as GANG/RAGE/KILL/GORE, which are fine
+# individually and only blocked in specific combinations)
+RAPE
+MICK
+COKE
+HUNS
+COON
+
+# Too informal/slang to be a satisfying puzzle endpoint
+TOON
+BRIT
+PHAT
+BROS
+MAGS
+
+# Technically valid but too obscure/unfamiliar to be satisfying as a puzzle endpoint
+CONN
+COTE

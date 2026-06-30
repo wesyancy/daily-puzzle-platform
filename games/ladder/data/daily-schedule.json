@@ -1,7 +1,716 @@
 {
   "2026-06-02": {
-    "easy":   ["COLD", "WARM"],
-    "medium": ["FIND", "LOSE"],
-    "hard":   ["LEND", "EARS"]
+    "easy": [
+      "COLD",
+      "WARM"
+    ],
+    "medium": [
+      "FIND",
+      "LOSE"
+    ],
+    "hard": [
+      "LEND",
+      "EARS"
+    ]
+  },
+  "2026-07-01": {
+    "easy": [
+      "KING",
+      "DOME"
+    ],
+    "medium": [
+      "SHED",
+      "SALE"
+    ],
+    "hard": [
+      "CHAR",
+      "DAMP"
+    ]
+  },
+  "2026-07-02": {
+    "easy": [
+      "TIDE",
+      "TEAL"
+    ],
+    "medium": [
+      "BELT",
+      "SAGE"
+    ],
+    "hard": [
+      "KITE",
+      "SCAM"
+    ]
+  },
+  "2026-07-03": {
+    "easy": [
+      "GONE",
+      "CURB"
+    ],
+    "medium": [
+      "RAIN",
+      "FORE"
+    ],
+    "hard": [
+      "FROG",
+      "KITS"
+    ]
+  },
+  "2026-07-04": {
+    "easy": [
+      "SEND",
+      "PEAR"
+    ],
+    "medium": [
+      "BEAT",
+      "CAPE"
+    ],
+    "hard": [
+      "BURY",
+      "FLAP"
+    ]
+  },
+  "2026-07-05": {
+    "easy": [
+      "BEAD",
+      "SLIP"
+    ],
+    "medium": [
+      "SUNG",
+      "WORD"
+    ],
+    "hard": [
+      "PLEA",
+      "FILL"
+    ]
+  },
+  "2026-07-06": {
+    "easy": [
+      "CARB",
+      "LIMP"
+    ],
+    "medium": [
+      "KEEN",
+      "GOAT"
+    ],
+    "hard": [
+      "SIGH",
+      "BEAM"
+    ]
+  },
+  "2026-07-07": {
+    "easy": [
+      "SICK",
+      "DIES"
+    ],
+    "medium": [
+      "FEAR",
+      "PACE"
+    ],
+    "hard": [
+      "HUSH",
+      "FLAG"
+    ]
+  },
+  "2026-07-08": {
+    "easy": [
+      "RUSH",
+      "HALT"
+    ],
+    "medium": [
+      "MATH",
+      "CALF"
+    ],
+    "hard": [
+      "HERB",
+      "GRAB"
+    ]
+  },
+  "2026-07-09": {
+    "easy": [
+      "HEAP",
+      "TALL"
+    ],
+    "medium": [
+      "RARE",
+      "LOAD"
+    ],
+    "hard": [
+      "MIND",
+      "GRAY"
+    ]
+  },
+  "2026-07-10": {
+    "easy": [
+      "BOUT",
+      "DEAR"
+    ],
+    "medium": [
+      "BELL",
+      "CAGE"
+    ],
+    "hard": [
+      "BOIL",
+      "PREY"
+    ]
+  },
+  "2026-07-11": {
+    "easy": [
+      "WIND",
+      "MOOD"
+    ],
+    "medium": [
+      "POST",
+      "RAID"
+    ],
+    "hard": [
+      "WEAR",
+      "GONE"
+    ]
+  },
+  "2026-07-12": {
+    "easy": [
+      "BUCK",
+      "LING"
+    ],
+    "medium": [
+      "SICK",
+      "GEAR"
+    ],
+    "hard": [
+      "BRAD",
+      "HURT"
+    ]
+  },
+  "2026-07-13": {
+    "easy": [
+      "PROP",
+      "SHIP"
+    ],
+    "medium": [
+      "ROLL",
+      "DEED"
+    ],
+    "hard": [
+      "WOOL",
+      "THAN"
+    ]
+  },
+  "2026-07-14": {
+    "easy": [
+      "FIND",
+      "DOME"
+    ],
+    "medium": [
+      "FOND",
+      "TACK"
+    ],
+    "hard": [
+      "TACK",
+      "FLAP"
+    ]
+  },
+  "2026-07-15": {
+    "easy": [
+      "LOOP",
+      "BOIL"
+    ],
+    "medium": [
+      "RANK",
+      "PEAR"
+    ],
+    "hard": [
+      "SNAP",
+      "WEEK"
+    ]
+  },
+  "2026-07-16": {
+    "easy": [
+      "PAGE",
+      "TYPE"
+    ],
+    "medium": [
+      "NEAR",
+      "PINK"
+    ],
+    "hard": [
+      "WAKE",
+      "ARMS"
+    ]
+  },
+  "2026-07-17": {
+    "easy": [
+      "HOLD",
+      "SAKE"
+    ],
+    "medium": [
+      "LORD",
+      "MILL"
+    ],
+    "hard": [
+      "SINS",
+      "GRAB"
+    ]
+  },
+  "2026-07-18": {
+    "easy": [
+      "NUTS",
+      "CANT"
+    ],
+    "medium": [
+      "COMB",
+      "FARM"
+    ],
+    "hard": [
+      "PROS",
+      "FIFE"
+    ]
+  },
+  "2026-07-19": {
+    "easy": [
+      "BRAS",
+      "HEAP"
+    ],
+    "medium": [
+      "ROSE",
+      "FIND"
+    ],
+    "hard": [
+      "WITH",
+      "FLOW"
+    ]
+  },
+  "2026-07-20": {
+    "easy": [
+      "BEAR",
+      "SAND"
+    ],
+    "medium": [
+      "SHED",
+      "SAME"
+    ],
+    "hard": [
+      "LAKE",
+      "SNAP"
+    ]
+  },
+  "2026-07-21": {
+    "easy": [
+      "DIRT",
+      "MATH"
+    ],
+    "medium": [
+      "PIKE",
+      "TANK"
+    ],
+    "hard": [
+      "BURY",
+      "FLAW"
+    ]
+  },
+  "2026-07-22": {
+    "easy": [
+      "HART",
+      "PIKE"
+    ],
+    "medium": [
+      "BEAD",
+      "HALF"
+    ],
+    "hard": [
+      "SLAB",
+      "RISK"
+    ]
+  },
+  "2026-07-23": {
+    "easy": [
+      "HERD",
+      "AIDE"
+    ],
+    "medium": [
+      "HERO",
+      "LAYS"
+    ],
+    "hard": [
+      "SCAR",
+      "TASK"
+    ]
+  },
+  "2026-07-24": {
+    "easy": [
+      "FILL",
+      "CARE"
+    ],
+    "medium": [
+      "BECK",
+      "FATE"
+    ],
+    "hard": [
+      "GRID",
+      "NEXT"
+    ]
+  },
+  "2026-07-25": {
+    "easy": [
+      "TIPS",
+      "KEEN"
+    ],
+    "medium": [
+      "SICK",
+      "MESS"
+    ],
+    "hard": [
+      "MALE",
+      "GRIM"
+    ]
+  },
+  "2026-07-26": {
+    "easy": [
+      "PIER",
+      "NINE"
+    ],
+    "medium": [
+      "BIRD",
+      "COIN"
+    ],
+    "hard": [
+      "COCA",
+      "HEAR"
+    ]
+  },
+  "2026-07-27": {
+    "easy": [
+      "LOCH",
+      "TOOL"
+    ],
+    "medium": [
+      "MALE",
+      "NEAR"
+    ],
+    "hard": [
+      "BREW",
+      "SOUL"
+    ]
+  },
+  "2026-07-28": {
+    "easy": [
+      "CANT",
+      "FITS"
+    ],
+    "medium": [
+      "BOND",
+      "SCAM"
+    ],
+    "hard": [
+      "SIGH",
+      "SPAN"
+    ]
+  },
+  "2026-07-29": {
+    "easy": [
+      "COLT",
+      "LASS"
+    ],
+    "medium": [
+      "LEND",
+      "GRAY"
+    ],
+    "hard": [
+      "SHIN",
+      "DOME"
+    ]
+  },
+  "2026-07-30": {
+    "easy": [
+      "WARD",
+      "SITE"
+    ],
+    "medium": [
+      "NOPE",
+      "WASH"
+    ],
+    "hard": [
+      "FIAT",
+      "DOOM"
+    ]
+  },
+  "2026-07-31": {
+    "easy": [
+      "LANE",
+      "DARN"
+    ],
+    "medium": [
+      "HAND",
+      "TEAR"
+    ],
+    "hard": [
+      "DUEL",
+      "SCAN"
+    ]
+  },
+  "2026-08-01": {
+    "easy": [
+      "PUSH",
+      "NEST"
+    ],
+    "medium": [
+      "KILL",
+      "PEER"
+    ],
+    "hard": [
+      "TOMB",
+      "FOUL"
+    ]
+  },
+  "2026-08-02": {
+    "easy": [
+      "REEL",
+      "FLEW"
+    ],
+    "medium": [
+      "HULL",
+      "SCAM"
+    ],
+    "hard": [
+      "NICK",
+      "FLAP"
+    ]
+  },
+  "2026-08-03": {
+    "easy": [
+      "RAID",
+      "BABE"
+    ],
+    "medium": [
+      "BAIT",
+      "SEND"
+    ],
+    "hard": [
+      "OATH",
+      "STEM"
+    ]
+  },
+  "2026-08-04": {
+    "easy": [
+      "WARP",
+      "RIPE"
+    ],
+    "medium": [
+      "PICK",
+      "MESS"
+    ],
+    "hard": [
+      "WORE",
+      "SHIP"
+    ]
+  },
+  "2026-08-05": {
+    "easy": [
+      "ROPE",
+      "WORD"
+    ],
+    "medium": [
+      "RUSH",
+      "DART"
+    ],
+    "hard": [
+      "SOAP",
+      "DAMS"
+    ]
+  },
+  "2026-08-06": {
+    "easy": [
+      "TONS",
+      "SEEM"
+    ],
+    "medium": [
+      "RATS",
+      "GORE"
+    ],
+    "hard": [
+      "HERB",
+      "FISH"
+    ]
+  },
+  "2026-08-07": {
+    "easy": [
+      "LAYS",
+      "PEST"
+    ],
+    "medium": [
+      "GAME",
+      "PUMA"
+    ],
+    "hard": [
+      "WEAR",
+      "LUSH"
+    ]
+  },
+  "2026-08-08": {
+    "easy": [
+      "WIPE",
+      "LOFT"
+    ],
+    "medium": [
+      "EARL",
+      "BITE"
+    ],
+    "hard": [
+      "DATE",
+      "SPAS"
+    ]
+  },
+  "2026-08-09": {
+    "easy": [
+      "MACK",
+      "LAMB"
+    ],
+    "medium": [
+      "PAIN",
+      "COPS"
+    ],
+    "hard": [
+      "KIND",
+      "TOUT"
+    ]
+  },
+  "2026-08-10": {
+    "easy": [
+      "DUST",
+      "MATH"
+    ],
+    "medium": [
+      "SEND",
+      "SOFT"
+    ],
+    "hard": [
+      "LIED",
+      "PORT"
+    ]
+  },
+  "2026-08-11": {
+    "easy": [
+      "SINK",
+      "NOTE"
+    ],
+    "medium": [
+      "SEEN",
+      "COAT"
+    ],
+    "hard": [
+      "HOLD",
+      "RAIN"
+    ]
+  },
+  "2026-08-12": {
+    "easy": [
+      "PALM",
+      "CONE"
+    ],
+    "medium": [
+      "CONE",
+      "SHOP"
+    ],
+    "hard": [
+      "SLAM",
+      "PULL"
+    ]
+  },
+  "2026-08-13": {
+    "easy": [
+      "HOST",
+      "MINE"
+    ],
+    "medium": [
+      "LEAD",
+      "SICK"
+    ],
+    "hard": [
+      "DULL",
+      "TANG"
+    ]
+  },
+  "2026-08-14": {
+    "easy": [
+      "BATE",
+      "LEND"
+    ],
+    "medium": [
+      "HERB",
+      "BOLT"
+    ],
+    "hard": [
+      "BANG",
+      "GRID"
+    ]
+  },
+  "2026-08-15": {
+    "easy": [
+      "NOTE",
+      "PILE"
+    ],
+    "medium": [
+      "CAMS",
+      "SEPT"
+    ],
+    "hard": [
+      "CHAR",
+      "HALE"
+    ]
+  },
+  "2026-08-16": {
+    "easy": [
+      "BUDS",
+      "WIND"
+    ],
+    "medium": [
+      "HEAL",
+      "SNAP"
+    ],
+    "hard": [
+      "REAR",
+      "ARID"
+    ]
+  },
+  "2026-08-17": {
+    "easy": [
+      "OATH",
+      "HUBS"
+    ],
+    "medium": [
+      "WILL",
+      "TANG"
+    ],
+    "hard": [
+      "GROW",
+      "SOIL"
+    ]
+  },
+  "2026-08-18": {
+    "easy": [
+      "REST",
+      "LONE"
+    ],
+    "medium": [
+      "COMA",
+      "PROF"
+    ],
+    "hard": [
+      "LAMB",
+      "CHAT"
+    ]
+  },
+  "2026-08-19": {
+    "easy": [
+      "BAKE",
+      "LINK"
+    ],
+    "medium": [
+      "COCA",
+      "PROG"
+    ],
+    "hard": [
+      "COIL",
+      "GAGE"
+    ]
   }
 }
