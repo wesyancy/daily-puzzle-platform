@@ -13,3 +13,12 @@ LARS
 
 # Drug / inappropriate
 METH
+
+# Always inappropriate as a puzzle word, regardless of pairing (unlike
+# blocked-pairs.txt entries such as GANG/RAGE/KILL/GORE, which are fine
+# individually and only blocked in specific combinations)
+RAPE
+
+# Technically valid but too obscure/unfamiliar to be satisfying as a puzzle endpoint
+CONN
+COTE

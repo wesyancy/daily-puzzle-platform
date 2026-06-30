@@ -1,7 +1,86 @@
 {
   "2026-06-02": {
-    "easy":   ["COLD", "WARM"],
-    "medium": ["FIND", "LOSE"],
-    "hard":   ["LEND", "EARS"]
+    "easy": [
+      "COLD",
+      "WARM"
+    ],
+    "medium": [
+      "FIND",
+      "LOSE"
+    ],
+    "hard": [
+      "LEND",
+      "EARS"
+    ]
+  },
+  "2026-07-01": {
+    "easy": [
+      "KING",
+      "DOME"
+    ],
+    "medium": [
+      "SHED",
+      "SALE"
+    ],
+    "hard": [
+      "CHAR",
+      "DAMP"
+    ]
+  },
+  "2026-07-02": {
+    "easy": [
+      "TIDE",
+      "TEAL"
+    ],
+    "medium": [
+      "BELT",
+      "SAGE"
+    ],
+    "hard": [
+      "KITE",
+      "SCAM"
+    ]
+  },
+  "2026-07-03": {
+    "easy": [
+      "GONE",
+      "CURB"
+    ],
+    "medium": [
+      "RAIN",
+      "FORE"
+    ],
+    "hard": [
+      "FROG",
+      "KITS"
+    ]
+  },
+  "2026-07-04": {
+    "easy": [
+      "SEND",
+      "PEAR"
+    ],
+    "medium": [
+      "BEAT",
+      "CAPE"
+    ],
+    "hard": [
+      "BURY",
+      "FLAP"
+    ]
+  },
+  "2026-07-05": {
+    "easy": [
+      "BEAD",
+      "SLIP"
+    ],
+    "medium": [
+      "SUNG",
+      "WORD"
+    ],
+    "hard": [
+      "PLEA",
+      "FILL"
+    ]
   }
 }

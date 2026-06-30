@@ -7,6 +7,10 @@
  * pool — see PUZZLE_PIPELINE.md). Never reuses a pair already present
  * anywhere in the existing schedule (any tier, any date), or within the
  * newly generated batch. Never overwrites a date that already has an entry.
+ * Excludes anything in data/blocked-words.txt or data/blocked-pairs.txt —
+ * note this filters at *selection* time only; pair-pool.txt itself was built
+ * without consulting these blocklists, so it may still contain blocked
+ * entries that simply never get chosen.
  * Writes a merged, date-sorted daily-schedule.json — review the diff before
  * deploying, this is a draft, not an auto-publish.
  *
@@ -56,6 +60,8 @@ const START_OVERRIDE = getStrArg('--start', '');
 
 const schedulePath = path.join(process.cwd(), 'data/daily-schedule.json');
 const poolPath = path.join(process.cwd(), 'data/pair-pool.txt');
+const blockedWordsPath = path.join(process.cwd(), 'data/blocked-words.txt');
+const blockedPairsPath = path.join(process.cwd(), 'data/blocked-pairs.txt');
 
 // Same move-count bands as TIER_MOVE_RANGE in apps/web/src/lib/generatePuzzle.ts —
 // keep these in sync if that file's tiers ever change.
@@ -112,9 +118,47 @@ function shuffle<T>(arr: T[]): T[] {
 }
 
 // Order-independent identity for a pair, so START→TARGET and TARGET→START
-// count as the same puzzle for repeat-avoidance purposes.
+// count as the same puzzle for repeat-avoidance and blocklist purposes.
 function pairKey(a: string, b: string): string {
     return [a, b].sort().join('|');
+}
+
+function loadBlockedWords(): Set<string> {
+    const blocked = new Set<string>();
+    try {
+        fs.readFileSync(blockedWordsPath, 'utf-8')
+            .split('\n')
+            .map((l) => l.trim().toUpperCase())
+            .filter((l) => l.length > 0 && !l.startsWith('#'))
+            .forEach((w) => blocked.add(w));
+    } catch {}
+    return blocked;
+}
+
+function loadBlockedPairs(): Set<string> {
+    const blocked = new Set<string>();
+    try {
+        fs.readFileSync(blockedPairsPath, 'utf-8')
+            .split('\n')
+            .map((l) => l.trim())
+            .filter((l) => l.length > 0 && !l.startsWith('#'))
+            .forEach((l) => {
+                const [a, b] = l.split(',').map((w) => w.trim().toUpperCase());
+                if (a && b) blocked.add(pairKey(a, b));
+            });
+    } catch {}
+    return blocked;
+}
+
+function isPairAllowed(
+    a: string,
+    b: string,
+    blockedWords: Set<string>,
+    blockedPairs: Set<string>,
+): boolean {
+    if (blockedWords.has(a) || blockedWords.has(b)) return false;
+    if (blockedPairs.has(pairKey(a, b))) return false;
+    return true;
 }
 
 // Fallback for tiers with no (remaining) pool coverage — random BFS search
@@ -125,6 +169,8 @@ function findFallbackPair(
     candidates: string[],
     wordSet: Set<string>,
     usedKeys: Set<string>,
+    blockedWords: Set<string>,
+    blockedPairs: Set<string>,
 ): Pair | null {
     const [minMoves, maxMoves] = TIER_MOVE_RANGE[tier];
     const MAX_ATTEMPTS = 20_000;
@@ -133,6 +179,7 @@ function findFallbackPair(
         const start = candidates[Math.floor(Math.random() * candidates.length)];
         const target = candidates[Math.floor(Math.random() * candidates.length)];
         if (start === target) continue;
+        if (!isPairAllowed(start, target, blockedWords, blockedPairs)) continue;
 
         const key = pairKey(start, target);
         if (usedKeys.has(key)) continue;
@@ -160,6 +207,8 @@ function main(): void {
     const wordSet = createWordSet(allWords);
     const commonWords = loadCommonWords();
     const candidates = allWords.filter((w) => w.length === 4 && commonWords.has(w));
+    const blockedWords = loadBlockedWords();
+    const blockedPairs = loadBlockedPairs();
 
     let schedule: Schedule = {};
     try {
@@ -200,8 +249,11 @@ function main(): void {
         let ok = true;
 
         for (const tier of ['easy', 'medium', 'hard'] as Tier[]) {
-            const fromPool = shuffle(pool[tier]).find(([a, b]) => !usedKeys.has(pairKey(a, b)));
-            const picked = fromPool ?? findFallbackPair(tier, candidates, wordSet, usedKeys);
+            const fromPool = shuffle(pool[tier]).find(
+                ([a, b]) => !usedKeys.has(pairKey(a, b)) && isPairAllowed(a, b, blockedWords, blockedPairs),
+            );
+            const picked =
+                fromPool ?? findFallbackPair(tier, candidates, wordSet, usedKeys, blockedWords, blockedPairs);
 
             if (!picked) {
                 console.warn(`  Could not find a fresh ${tier} pair for ${cursor} — stopping early.`);
