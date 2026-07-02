@@ -97,7 +97,7 @@ function loadStoredGame(fallbackSet: PuzzleSet): StoredGame {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function GameClient({ puzzleSet }: { puzzleSet: PuzzleSet }) {
+export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: PuzzleSet; isDailyMode: boolean }) {
     const router = useRouter();
 
     // ── State ─────────────────────────────────────────────────────────────────
@@ -515,11 +515,14 @@ export default function GameClient({ puzzleSet }: { puzzleSet: PuzzleSet }) {
                         </div>
 
                         <div className="flex flex-col gap-3 sm:flex-row">
-                            <button
-                                onClick={handleNewSet}
-                                className="border-2 border-yellow-400 rounded px-4 py-3 text-sm font-semibold w-full sm:flex-1">
-                                ↻ New puzzle set
-                            </button>
+                            {/* Hidden in daily mode — one puzzle set per day, no re-rolls. */}
+                            {!isDailyMode && (
+                                <button
+                                    onClick={handleNewSet}
+                                    className="border-2 border-yellow-400 rounded px-4 py-3 text-sm font-semibold w-full sm:flex-1">
+                                    ↻ New puzzle set
+                                </button>
+                            )}
                             <button
                                 onClick={handleShare}
                                 className="border-2 border-blue-400 rounded px-4 py-3 text-sm font-semibold w-full sm:flex-1">
@@ -714,13 +717,15 @@ export default function GameClient({ puzzleSet }: { puzzleSet: PuzzleSet }) {
                         </>
                     )}
 
-                    {/* New puzzle set + Word report */}
+                    {/* New puzzle set + Word report; new-set hidden in daily mode. */}
                     <div className="flex flex-col gap-4 items-center sm:flex-row sm:justify-center">
-                        <button
-                            onClick={handleNewSet}
-                            className="border-2 border-yellow-400 rounded px-3 py-3 sm:py-2 text-sm w-3/5 sm:w-48">
-                            ↻ New puzzle set
-                        </button>
+                        {!isDailyMode && (
+                            <button
+                                onClick={handleNewSet}
+                                className="border-2 border-yellow-400 rounded px-3 py-3 sm:py-2 text-sm w-3/5 sm:w-48">
+                                ↻ New puzzle set
+                            </button>
+                        )}
                         <button
                             onClick={() => setShowWordReportModal(true)}
                             className="border-2 border-orange-400 rounded px-3 py-3 sm:py-2 text-sm w-2/5 sm:w-48 opacity-60 hover:opacity-100 transition-opacity">
