@@ -15,6 +15,6 @@ import type { PuzzleSet } from '@/lib/generatePuzzle';
 
 const GameClient = dynamic(() => import('./GameClient'), { ssr: false });
 
-export default function GameClientLoader({ puzzleSet }: { puzzleSet: PuzzleSet }) {
-    return <GameClient puzzleSet={puzzleSet} />;
+export default function GameClientLoader({ puzzleSet, isDailyMode }: { puzzleSet: PuzzleSet; isDailyMode: boolean }) {
+    return <GameClient puzzleSet={puzzleSet} isDailyMode={isDailyMode} />;
 }

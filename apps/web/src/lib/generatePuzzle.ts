@@ -22,6 +22,10 @@ import { bfsShortestPath, computeNeighborGraph } from '@repo/game-engine';
 // rather than accidentally locking production into daily mode.
 const DAILY_MODE = process.env.DAILY_MODE === 'true';
 
+// Exported so the page can pass isDailyMode to GameClient, which uses it to
+// hide the "New puzzle set" button (no re-rolls in daily mode).
+export const isDailyMode = DAILY_MODE;
+
 // Single fixed reference timezone for the daily rollover (same convention as NYT
 // Wordle) — every player gets the new puzzle at midnight here, not their own local
 // midnight, since true per-player local rollover would require moving puzzle
