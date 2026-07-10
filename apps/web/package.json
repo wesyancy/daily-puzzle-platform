@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@repo/analytics": "workspace:*",
     "@repo/dictionary": "workspace:*",
     "@repo/game-engine": "workspace:*",
     "@supabase/supabase-js": "^2.106.2",

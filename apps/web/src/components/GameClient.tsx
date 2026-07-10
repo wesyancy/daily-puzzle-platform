@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { submitFeedback, submitWordReport } from '@/app/actions';
+import { submitFeedback, submitWordReport, submitGameEvent } from '@/app/actions';
 import type { PuzzleSet, Tier, TieredPuzzle } from '@/lib/generatePuzzle';
+import { getSessionId } from '@repo/analytics';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -152,6 +153,11 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
     // Auto-advance timer
     const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+    // Analytics: anonymous session ID (created once, persists in localStorage)
+    const sessionIdRef = useRef<string>('');
+    // Per-tier start timestamps — captured on first move, used for time_ms in puzzle_completed
+    const tierStartTimeRef = useRef<Partial<Record<Tier, number>>>({});
+
     // ── One-time mount effect ─────────────────────────────────────────────────
     // State is already initialized from localStorage via lazy initializers above.
     // This effect only handles: instructions first-visit check, marking already-
@@ -170,6 +176,9 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
                 solvedAnimationFired.current.add(t);
             }
         }
+
+        // Initialize anonymous session ID from localStorage (created here if this is first visit).
+        sessionIdRef.current = getSessionId();
 
         setHydrated(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -212,6 +221,16 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
             setMessage('');
         } else {
             setShowSummary(true);
+            // All three tiers done — fire set_completed with outcome summary.
+            const sid = sessionIdRef.current;
+            if (sid) {
+                const tierResults = Object.fromEntries(
+                    TIERS.map((t) => [t, state.puzzles[t].status]),
+                );
+                void submitGameEvent('stepladder', sid, 'set_completed', null, {
+                    tier_results: tierResults,
+                });
+            }
         }
     }, [state.puzzles]);
 
@@ -306,6 +325,13 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
 
         const nextMoves = [...moves, guess];
         const nowSolved = guess === activePuzzle.target;
+        const isFirstMove = progress.status === 'not-started';
+        const now = Date.now();
+
+        // Capture tier start time on first move so puzzle_completed can include time_ms.
+        if (isFirstMove) {
+            tierStartTimeRef.current[activeTier] = now;
+        }
 
         // Move limiter disabled — puzzles can only be completed by solving them.
         // Re-enable by restoring the nowFailed / moveLimit check here.
@@ -314,6 +340,32 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
         updateProgress(activeTier, { moves: nextMoves, status: newStatus });
         setInput('');
         setShowHints(false);
+
+        // Fire analytics events fire-and-forget — never block the submit flow.
+        const sid = sessionIdRef.current;
+        if (sid) {
+            if (isFirstMove) {
+                void submitGameEvent('stepladder', sid, 'puzzle_started', activeTier, {
+                    start: activePuzzle.start,
+                    target: activePuzzle.target,
+                    optimal: activePuzzle.optimalPath.length - 1,
+                });
+            }
+            void submitGameEvent('stepladder', sid, 'guess_submitted', activeTier, {
+                word: guess,
+                move_number: nextMoves.length - 1,
+            });
+            if (nowSolved) {
+                const startTime = tierStartTimeRef.current[activeTier];
+                void submitGameEvent('stepladder', sid, 'puzzle_completed', activeTier, {
+                    solved: true,
+                    moves_taken: nextMoves.length - 1,
+                    optimal: activePuzzle.optimalPath.length - 1,
+                    hints_used: progress.hintsUsed,
+                    time_ms: startTime ? now - startTime : null,
+                });
+            }
+        }
 
         // Two-frame approach: let the new tile render first, then add the animation
         // class in the next event loop tick. This mirrors how animate-pop works on
@@ -705,6 +757,14 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
                                                 hintsUsed: Math.min(progress.hintsUsed + 1, 2),
                                                 hintWord: currentWord,
                                             });
+                                            // Only fire when a charge actually applies — reopening for same word is free.
+                                            const sid = sessionIdRef.current;
+                                            if (sid) {
+                                                void submitGameEvent('stepladder', sid, 'hint_used', activeTier, {
+                                                    at_word: currentWord,
+                                                    hint_number: progress.hintsUsed + 1,
+                                                });
+                                            }
                                         }
                                         setShowHints((v) => !v);
                                     }}
