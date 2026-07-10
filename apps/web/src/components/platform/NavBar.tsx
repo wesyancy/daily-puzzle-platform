@@ -1,4 +1,8 @@
+'use client';
+
 import Link from 'next/link';
+import { DropdownMenu } from 'radix-ui';
+import { Menu } from 'lucide-react';
 import { SettingsMenu } from './SettingsMenu';
 
 // Platform-level nav bar — rendered once in root layout, sits above all game content.
@@ -16,18 +20,62 @@ export function NavBar() {
                 </Link>
             </div>
 
-            {/* Right: platform links + settings */}
+            {/* Right: desktop links + mobile hamburger + settings */}
             <div className="flex items-center gap-1">
+                {/* Desktop-only nav links */}
                 <Link
                     href="/leaderboards"
-                    className="text-sm opacity-50 hover:opacity-80 transition-opacity px-2 py-1 rounded hover:bg-black/5 dark:hover:bg-white/5">
+                    className="hidden sm:inline-block text-sm opacity-50 hover:opacity-80 transition-opacity px-2 py-1 rounded hover:bg-black/5 dark:hover:bg-white/5">
                     Leaderboards
                 </Link>
                 <Link
                     href="/feedback"
-                    className="text-sm opacity-50 hover:opacity-80 transition-opacity px-2 py-1 rounded hover:bg-black/5 dark:hover:bg-white/5 hidden sm:inline-block">
+                    className="hidden sm:inline-block text-sm opacity-50 hover:opacity-80 transition-opacity px-2 py-1 rounded hover:bg-black/5 dark:hover:bg-white/5">
                     Feedback
                 </Link>
+
+                {/* Mobile hamburger — hidden on sm+, reveals all nav links */}
+                <div className="sm:hidden">
+                    <DropdownMenu.Root>
+                        <DropdownMenu.Trigger asChild>
+                            <button
+                                className="border rounded p-2 opacity-70 hover:opacity-100 transition-opacity"
+                                aria-label="Menu">
+                                <Menu className="w-4 h-4" />
+                            </button>
+                        </DropdownMenu.Trigger>
+                        <DropdownMenu.Portal>
+                            <DropdownMenu.Content
+                                align="end"
+                                sideOffset={8}
+                                className="bg-[var(--background)] border rounded-lg py-1 shadow-lg min-w-[10rem] z-50">
+                                <DropdownMenu.Item asChild>
+                                    <Link
+                                        href="/stepladder"
+                                        className="block px-4 py-2.5 text-sm font-semibold hover:bg-black/5 dark:hover:bg-white/5 outline-none cursor-pointer">
+                                        Stepladder
+                                    </Link>
+                                </DropdownMenu.Item>
+                                <DropdownMenu.Separator className="my-1 border-t" />
+                                <DropdownMenu.Item asChild>
+                                    <Link
+                                        href="/leaderboards"
+                                        className="block px-4 py-2.5 text-sm opacity-70 hover:opacity-100 hover:bg-black/5 dark:hover:bg-white/5 outline-none cursor-pointer">
+                                        Leaderboards
+                                    </Link>
+                                </DropdownMenu.Item>
+                                <DropdownMenu.Item asChild>
+                                    <Link
+                                        href="/feedback"
+                                        className="block px-4 py-2.5 text-sm opacity-70 hover:opacity-100 hover:bg-black/5 dark:hover:bg-white/5 outline-none cursor-pointer">
+                                        Feedback
+                                    </Link>
+                                </DropdownMenu.Item>
+                            </DropdownMenu.Content>
+                        </DropdownMenu.Portal>
+                    </DropdownMenu.Root>
+                </div>
+
                 <div className="ml-1">
                     <SettingsMenu />
                 </div>
