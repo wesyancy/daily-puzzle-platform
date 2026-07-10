@@ -3,7 +3,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { submitFeedback, submitWordReport } from '@/app/actions';
-import { ThemeToggle } from '@/components/ThemeToggle';
 import type { PuzzleSet, Tier, TieredPuzzle } from '@/lib/generatePuzzle';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -483,7 +482,8 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
                 {showNewSetModal && renderNewSetModal()}
                 {showWordReportModal && renderWordReportModal()}
 
-                <main className="w-full max-w-xl mx-auto px-4 flex flex-col h-dvh sm:h-auto sm:min-h-screen">
+                {/* h-[calc(100dvh-3rem)] subtracts the NavBar's h-12 from the mobile viewport budget */}
+                <main className="w-full max-w-xl mx-auto px-4 flex flex-col h-[calc(100dvh-3rem)] sm:h-auto sm:min-h-screen">
                     <div className="flex-none pt-6 sm:pt-8 pb-4 flex flex-col gap-4">
                         <div className="flex items-center justify-between">
                             <div className="flex flex-col gap-0.5">
@@ -496,7 +496,6 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
                                     className="border rounded px-2.5 py-1.5 text-sm opacity-70 hover:opacity-100 transition-opacity">
                                     How to Play
                                 </button>
-                                <ThemeToggle />
                             </div>
                         </div>
                     </div>
@@ -588,7 +587,8 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
                 </div>
             )}
 
-            <main className="w-full max-w-xl mx-auto px-4 flex flex-col h-dvh sm:h-auto sm:min-h-screen">
+            {/* h-[calc(100dvh-3rem)] subtracts the NavBar's h-12 from the mobile viewport budget */}
+            <main className="w-full max-w-xl mx-auto px-4 flex flex-col h-[calc(100dvh-3rem)] sm:h-auto sm:min-h-screen">
 
                 {/* ── Top: always visible ── */}
                 <div className="flex-none pt-6 sm:pt-8 pb-4 flex flex-col gap-4">
@@ -604,7 +604,6 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
                                 title="How to play">
                                 How to Play
                             </button>
-                            <ThemeToggle />
                         </div>
                     </div>
 
