@@ -3,8 +3,14 @@
     "version": "0.0.1",
     "private": true,
     "main": "./src/index.ts",
+    "scripts": {
+        "test": "vitest run"
+    },
     "dependencies": {
-        "@repo/game-engine": "workspace:*",
-        "@repo/dictionary": "workspace:*"
+        "@repo/dictionary": "workspace:*",
+        "@repo/game-engine": "workspace:*"
+    },
+    "devDependencies": {
+        "vitest": "^4.1.10"
     }
 }
