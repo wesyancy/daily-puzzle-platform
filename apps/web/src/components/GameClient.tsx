@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { submitFeedback, submitWordReport, submitGameEvent } from '@/app/actions';
 import type { PuzzleSet, Tier, TieredPuzzle } from '@/lib/generatePuzzle';
 import { getSessionId } from '@repo/analytics';
+import { StepladderKeyboard } from '@/components/stepladder/StepladderKeyboard';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -204,6 +205,8 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
     const failed = progress.status === 'failed';
     // Move limiter disabled — atLimit always false. Re-enable by restoring moveCount check.
     const atLimit = false;
+    // Blocks input when the tier outcome is already decided.
+    const inputBlocked = solved || failed || atLimit;
     // Derived from persisted progress: true if the hint was already opened for the current word.
     const hintConsumedForWord = progress.hintWord === currentWord;
     const validNextWords = [...(activePuzzle.neighborGraph[currentWord] ?? [])].sort();
@@ -382,9 +385,43 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
         }
     }
 
-    function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-        if (e.key === 'Enter') submitMove();
+    // Letter append/remove — shared by virtual keyboard and global keydown listener.
+    function appendLetter(ch: string) {
+        if (input.length >= activePuzzle.start.length) return;
+        setInput((prev) => prev + ch);
     }
+
+    function backspace() {
+        setInput((prev) => prev.slice(0, -1));
+    }
+
+    // Called by both StepladderKeyboard ENTER and the global keydown handler.
+    function handleKeyPress(key: string) {
+        if (key === 'ENTER') { submitMove(); return; }
+        if (key === 'BACKSPACE') { backspace(); return; }
+        if (/^[A-Z]$/.test(key)) { appendLetter(key); return; }
+    }
+
+    // Gate: block all game keystrokes while any modal is open.
+    const anyModalOpen = showInstructions || showHints || showNewSetModal || showWordReportModal;
+
+    // Global physical keyboard listener — uses a ref so the closure is never stale.
+    const keydownHandlerRef = useRef<((e: KeyboardEvent) => void) | undefined>(undefined);
+    keydownHandlerRef.current = (e: KeyboardEvent) => {
+        if (anyModalOpen || inputBlocked) return;
+        if (e.metaKey || e.ctrlKey || e.altKey) return;
+        if (e.key === 'Enter') { submitMove(); return; }
+        if (e.key === 'Backspace') { e.preventDefault(); backspace(); return; }
+        if (/^[a-zA-Z]$/.test(e.key)) { appendLetter(e.key.toUpperCase()); return; }
+    };
+
+    useEffect(() => {
+        // Register once; the ref keeps the handler current on every render.
+        const handler = (e: KeyboardEvent) => keydownHandlerRef.current?.(e);
+        window.addEventListener('keydown', handler);
+        return () => window.removeEventListener('keydown', handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     function pickHint(word: string) {
         setInput(word);
@@ -596,8 +633,6 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
 
     // ── Active puzzle screen ──────────────────────────────────────────────────
 
-    const inputBlocked = solved || failed || atLimit;
-
     return (
         <>
             {showInstructions && renderInstructionsModal()}
@@ -686,7 +721,7 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
 
                 </div>
 
-                {/* ── Middle: scrollable word chain ── */}
+                {/* ── Middle: scrollable word chain + current guess tile ── */}
                 <div
                     ref={scrollAreaRef}
                     className="flex-1 overflow-y-auto flex flex-col gap-2 pb-2 sm:flex-none sm:max-h-[35vh]">
@@ -715,41 +750,26 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
                             </div>
                         );
                     })}
+
+                    {/* Current guess tile — dashed border, lives below the submitted chain */}
+                    {!inputBlocked && (
+                        <div className="border-2 border-dashed border-blue-400 rounded px-4 py-2 text-lg font-mono min-h-[2.75rem] text-blue-500 dark:text-blue-400">
+                            {input.toUpperCase() || <span className="opacity-0">·</span>}
+                        </div>
+                    )}
                 </div>
 
-                {/* ── Bottom: always visible controls ── */}
-                <div className="flex-none pt-4 pb-6 sm:pb-8 flex flex-col gap-4">
+                {/* ── Bottom: keyboard + secondary controls ── */}
+                <div className="flex-none pt-2 pb-4 flex flex-col gap-2">
 
                     {wordReportToast && (
-                        <p className="text-sm opacity-70">{wordReportToast}</p>
+                        <p className="text-sm opacity-70 text-center">{wordReportToast}</p>
                     )}
 
                     {!inputBlocked && (
                         <>
-                            {/* Mobile-only input */}
-                            <input
-                                value={input}
-                                onChange={(e) => setInput(e.target.value)}
-                                onKeyDown={handleKeyDown}
-                                className="sm:hidden border-2 rounded px-4 py-2 w-full bg-transparent font-mono uppercase text-lg"
-                                placeholder="Next word"
-                                maxLength={activePuzzle.start.length}
-                            />
-                            <div className="flex flex-col gap-4 items-center sm:items-stretch sm:flex-row sm:gap-2">
-                                <input
-                                    value={input}
-                                    onChange={(e) => setInput(e.target.value)}
-                                    onKeyDown={handleKeyDown}
-                                    className="hidden sm:block sm:flex-1 sm:min-w-0 border rounded px-4 py-2 bg-transparent font-mono uppercase sm:text-lg"
-                                    placeholder="Next word"
-                                    maxLength={activePuzzle.start.length}
-                                    autoFocus
-                                />
-                                <button
-                                    onClick={() => submitMove()}
-                                    className="border-2 border-green-500 rounded px-4 py-4 sm:py-2 w-full sm:w-auto sm:shrink-0">
-                                    Submit
-                                </button>
+                            {/* Hint button — sits above the keyboard */}
+                            <div className="flex justify-end">
                                 <button
                                     onClick={() => {
                                         if (!hintConsumedForWord) {
@@ -769,25 +789,31 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
                                         setShowHints((v) => !v);
                                     }}
                                     disabled={progress.hintsUsed >= 2 && !hintConsumedForWord}
-                                    className="border rounded px-4 py-3 sm:py-2 w-4/5 sm:w-auto sm:shrink-0 text-sm opacity-60 hover:opacity-100 transition-opacity disabled:opacity-25 disabled:cursor-not-allowed">
+                                    className="border rounded px-4 py-1.5 text-sm opacity-60 hover:opacity-100 transition-opacity disabled:opacity-25 disabled:cursor-not-allowed">
                                     Hint ×{Math.max(0, 2 - progress.hintsUsed)}
                                 </button>
                             </div>
+
+                            {/* Virtual keyboard — handles both letter input and submit (ENTER) */}
+                            <StepladderKeyboard
+                                onKeyPress={handleKeyPress}
+                                disabled={inputBlocked}
+                            />
                         </>
                     )}
 
                     {/* New puzzle set + Word report; new-set hidden in daily mode. */}
-                    <div className="flex flex-col gap-4 items-center sm:flex-row sm:justify-center">
+                    <div className="flex gap-2 items-center justify-center mt-1">
                         {!isDailyMode && (
                             <button
                                 onClick={handleNewSet}
-                                className="border-2 border-yellow-400 rounded px-3 py-3 sm:py-2 text-sm w-3/5 sm:w-48">
+                                className="border-2 border-yellow-400 rounded px-3 py-2 text-sm">
                                 ↻ New puzzle set
                             </button>
                         )}
                         <button
                             onClick={() => setShowWordReportModal(true)}
-                            className="border-2 border-orange-400 rounded px-3 py-3 sm:py-2 text-sm w-2/5 sm:w-48 opacity-60 hover:opacity-100 transition-opacity">
+                            className="border-2 border-orange-400 rounded px-3 py-2 text-sm opacity-60 hover:opacity-100 transition-opacity">
                             Missing/Report Word
                         </button>
                     </div>
