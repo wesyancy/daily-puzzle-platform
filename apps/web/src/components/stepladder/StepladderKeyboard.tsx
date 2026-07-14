@@ -24,11 +24,11 @@ export function StepladderKeyboard({ onKeyPress, disabled }: Props) {
                         const isDelete = key === '⌫';
                         const emittedKey = isDelete ? 'BACKSPACE' : key;
 
-                        // Action keys get colored outlines; letter keys keep the neutral style.
+                        // Action keys get colored borders only; background and text match letter keys.
                         const colorClasses = isEnter
-                            ? 'bg-green-50 dark:bg-green-950/40 border-2 border-green-500 text-green-700 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/50'
+                            ? 'bg-gray-200 dark:bg-neutral-600 border-2 border-green-500 hover:bg-gray-300 dark:hover:bg-neutral-500'
                             : isDelete
-                            ? 'bg-red-50 dark:bg-red-950/40 border-2 border-red-500 text-red-700 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50'
+                            ? 'bg-gray-200 dark:bg-neutral-600 border-2 border-red-500 hover:bg-gray-300 dark:hover:bg-neutral-500'
                             : 'bg-gray-200 dark:bg-neutral-600 border border-black/10 dark:border-white/10 hover:bg-gray-300 dark:hover:bg-neutral-500';
 
                         return (
