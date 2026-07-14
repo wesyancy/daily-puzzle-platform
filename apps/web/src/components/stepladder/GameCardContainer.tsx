@@ -1,3 +1,6 @@
+'use client';
+
+import { useEffect, useState } from 'react';
 import type { RefObject } from 'react';
 
 interface Props {
@@ -11,19 +14,89 @@ interface Props {
     input: string;
 }
 
+// Builds a linear-gradient mask that fades the top, bottom, or both edges.
+// Returns undefined when no fade should be shown (no mask applied).
+function buildMaskImage(showTop: boolean, showBottom: boolean): string | undefined {
+    if (!showTop && !showBottom) return undefined;
+    const stops: string[] = [];
+    stops.push(showTop ? 'transparent' : 'black');
+    if (showTop) stops.push('black 2rem');
+    if (showBottom) stops.push('black calc(100% - 2rem)');
+    stops.push(showBottom ? 'transparent' : 'black');
+    return `linear-gradient(to bottom, ${stops.join(', ')})`;
+}
+
+// Reads the scroll container's current overflow/scroll state and updates fade flags.
+function readFades(el: HTMLDivElement): { top: boolean; bottom: boolean } {
+    const overflowing = el.scrollHeight > el.clientHeight;
+    return {
+        top: overflowing && el.scrollTop > 0,
+        // 1px tolerance handles sub-pixel rounding in some browsers
+        bottom: overflowing && el.scrollTop + el.clientHeight < el.scrollHeight - 1,
+    };
+}
+
 // Game Card Container — scrollable submitted word chain plus the live current-guess tile.
 // scrollRef is owned by GameClient so the auto-scroll useEffect can remain there.
+// flex-1 on both mobile and desktop so the card area always fills the space between
+// the game header and the keyboard, keeping the keyboard pinned to the viewport bottom.
 export function GameCardContainer({
     scrollRef, moves, flashTileIndex, solved, failed, solvedAnimating, inputBlocked, input,
 }: Props) {
+    const [showTopFade, setShowTopFade] = useState(false);
+    const [showBottomFade, setShowBottomFade] = useState(false);
+
+    // Set up scroll and resize listeners once on mount.
+    useEffect(() => {
+        const el = scrollRef.current;
+        if (!el) return;
+
+        function update() {
+            if (!el) return;
+            const { top, bottom } = readFades(el);
+            setShowTopFade(top);
+            setShowBottomFade(bottom);
+        }
+
+        update();
+        el.addEventListener('scroll', update);
+        // ResizeObserver catches container size changes (e.g. window resize, keyboard toggle)
+        const ro = new ResizeObserver(update);
+        ro.observe(el);
+
+        return () => {
+            el.removeEventListener('scroll', update);
+            ro.disconnect();
+        };
+    // scrollRef is a stable RefObject — this effect only needs to run once
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // Recheck fades after every move since new tiles change the scroll height.
+    // rAF lets the DOM paint first so scrollHeight is accurate.
+    useEffect(() => {
+        const id = requestAnimationFrame(() => {
+            const el = scrollRef.current;
+            if (!el) return;
+            const { top, bottom } = readFades(el);
+            setShowTopFade(top);
+            setShowBottomFade(bottom);
+        });
+        return () => cancelAnimationFrame(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [moves]);
+
+    const maskImage = buildMaskImage(showTopFade, showBottomFade);
+
     return (
         <div
             ref={scrollRef}
-            className="flex-1 overflow-y-auto flex flex-col gap-2 pt-2 pb-2 sm:flex-none sm:max-h-[35vh]"
+            // flex-1 fills the space between the game header and keyboard on both
+            // mobile and desktop. Scrollbar is hidden; the fade cues scrollability.
+            className="flex-1 overflow-y-auto flex flex-col gap-2 pt-2 pb-2 [&::-webkit-scrollbar]:hidden"
             style={{
-                // Fade edges so content softly disappears when the list is taller than the container
-                maskImage: 'linear-gradient(to bottom, transparent, black 2rem, black calc(100% - 2rem), transparent)',
-                WebkitMaskImage: 'linear-gradient(to bottom, transparent, black 2rem, black calc(100% - 2rem), transparent)',
+                scrollbarWidth: 'none',
+                ...(maskImage ? { maskImage, WebkitMaskImage: maskImage } : {}),
             }}>
             {moves.map((move, index) => {
                 const isLast = index === moves.length - 1;

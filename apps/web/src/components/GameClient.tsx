@@ -622,7 +622,7 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
                 )}
 
                 {/* h-[calc(100dvh-3rem)] subtracts the NavBar's h-12 from the mobile viewport budget */}
-                <main className="w-full max-w-xl mx-auto px-4 flex flex-col h-[calc(100dvh-3rem)] sm:min-h-[calc(100vh-3rem)]">
+                <main className="w-full max-w-xl mx-auto px-4 flex flex-col h-[calc(100dvh-3rem)] sm:min-h-[calc(100vh-3rem)] overflow-hidden">
                     <div className="flex-none pt-6 sm:pt-8 pb-4">
                         <GameHeader onHowToPlay={() => setShowInstructions(true)} />
                     </div>
@@ -770,7 +770,7 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
             )}
 
             {/* h-[calc(100dvh-3rem)] subtracts the NavBar's h-12 from the mobile viewport budget */}
-            <main className="w-full max-w-xl mx-auto px-4 flex flex-col h-[calc(100dvh-3rem)] sm:min-h-[calc(100vh-3rem)]">
+            <main className="w-full max-w-xl mx-auto px-4 flex flex-col h-[calc(100dvh-3rem)] sm:min-h-[calc(100vh-3rem)] overflow-hidden">
 
                 {/* ── Top: always visible ── */}
                 <div className="flex-none pt-6 sm:pt-8 pb-4 flex flex-col gap-4">
