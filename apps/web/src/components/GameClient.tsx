@@ -2,9 +2,19 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { submitFeedback, submitWordReport } from '@/app/actions';
-import { ThemeToggle } from '@/components/ThemeToggle';
+import { submitFeedback, submitWordReport, submitGameEvent, getDailyPercentile } from '@/app/actions';
 import type { PuzzleSet, Tier, TieredPuzzle } from '@/lib/generatePuzzle';
+import { getSessionId } from '@repo/analytics';
+import { tierScore, calculateCumulativeScore } from '@/lib/calculateCumulativeScore';
+import { TIERS, TIER_LABELS, TIER_EMOJI, TIER_NUMBER } from '@/components/stepladder/constants';
+import { GameHeader } from '@/components/stepladder/GameHeader';
+import { GameStatusArea } from '@/components/stepladder/GameStatusArea';
+import { GameCardContainer } from '@/components/stepladder/GameCardContainer';
+import { StepladderKeyboard } from '@/components/stepladder/StepladderKeyboard';
+import { InstructionsModal } from '@/components/stepladder/InstructionsModal';
+import { ResultModal } from '@/components/stepladder/ResultModal';
+import { NewSetModal } from '@/components/stepladder/NewSetModal';
+import { WordReportModal } from '@/components/stepladder/WordReportModal';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -33,10 +43,6 @@ type WordReportStage = 'idle' | 'missing' | 'bad';
 
 const STATE_KEY = 'stepladder-set-state';
 const PUZZLE_KEY = 'stepladder-puzzle-set';
-const TIERS: Tier[] = ['easy', 'medium', 'hard'];
-const TIER_LABELS: Record<Tier, string> = { easy: 'Easy', medium: 'Medium', hard: 'Hard' };
-const TIER_EMOJI: Record<Tier, string> = { easy: '🟢', medium: '🟡', hard: '🔴' };
-const TIER_NUMBER: Record<Tier, number> = { easy: 1, medium: 2, hard: 3 };
 
 const ADVANCE_DELAY_PASS = 3000;  // ms after solving before auto-advancing
 const ADVANCE_DELAY_FAIL = 4000;  // ms after failing before auto-advancing
@@ -116,7 +122,6 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
 
     // Modals
     const [showInstructions, setShowInstructions] = useState(false);
-    const [instructionsPage, setInstructionsPage] = useState<1 | 2 | 3>(1);
     const [showHints, setShowHints] = useState(false);
     const [showSummary, setShowSummary] = useState(showSummaryInit);
     const [showNewSetModal, setShowNewSetModal] = useState(false);
@@ -136,7 +141,7 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
     const solvedAnimationFired = useRef<Set<Tier>>(new Set());
 
     // Result modal (shown immediately on pass/fail, auto-dismisses when advance fires)
-    type ResultModal = { passed: boolean; movesTaken: number; shortestPath: number };
+    type ResultModal = { passed: boolean; movesTaken: number; shortestPath: number; score: number };
     const [resultModal, setResultModal] = useState<ResultModal | null>(null);
 
     // Hint tracking: derived from persisted progress — survives refresh correctly.
@@ -146,12 +151,21 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
     const scrollAreaRef = useRef<HTMLDivElement>(null);
     const [shareCopied, setShareCopied] = useState(false);
 
+    // Percentile comparison — fetched when summary opens in daily mode.
+    // null means "not yet fetched or insufficient data"; undefined means "not started".
+    const [percentiles, setPercentiles] = useState<Partial<Record<Tier, number | null>>>({});
+
     // Flash animation: tracks the index of the most recently played word tile
     const [flashTileIndex, setFlashTileIndex] = useState(-1);
     const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // Auto-advance timer
     const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    // Analytics: anonymous session ID (created once, persists in localStorage)
+    const sessionIdRef = useRef<string>('');
+    // Per-tier start timestamps — captured on first move, used for time_ms in puzzle_completed
+    const tierStartTimeRef = useRef<Partial<Record<Tier, number>>>({});
 
     // ── One-time mount effect ─────────────────────────────────────────────────
     // State is already initialized from localStorage via lazy initializers above.
@@ -160,7 +174,6 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
 
     useEffect(() => {
         if (!localStorage.getItem('stepladder-seen-instructions')) {
-            setInstructionsPage(1);
             setShowInstructions(true);
         }
 
@@ -171,6 +184,9 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
                 solvedAnimationFired.current.add(t);
             }
         }
+
+        // Initialize anonymous session ID from localStorage (created here if this is first visit).
+        sessionIdRef.current = getSessionId();
 
         setHydrated(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -196,6 +212,8 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
     const failed = progress.status === 'failed';
     // Move limiter disabled — atLimit always false. Re-enable by restoring moveCount check.
     const atLimit = false;
+    // Blocks input when the tier outcome is already decided.
+    const inputBlocked = solved || failed || atLimit;
     // Derived from persisted progress: true if the hint was already opened for the current word.
     const hintConsumedForWord = progress.hintWord === currentWord;
     const validNextWords = [...(activePuzzle.neighborGraph[currentWord] ?? [])].sort();
@@ -213,6 +231,16 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
             setMessage('');
         } else {
             setShowSummary(true);
+            // All three tiers done — fire set_completed with outcome summary.
+            const sid = sessionIdRef.current;
+            if (sid) {
+                const tierResults = Object.fromEntries(
+                    TIERS.map((t) => [t, state.puzzles[t].status]),
+                );
+                void submitGameEvent('stepladder', sid, 'set_completed', null, {
+                    tier_results: tierResults,
+                });
+            }
         }
     }, [state.puzzles]);
 
@@ -223,7 +251,8 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
             setSolvedAnimating(true);
             const movesTaken = state.puzzles[activeTier].moves.length - 1;
             const shortestPath = activePuzzleSet[activeTier].optimalPath.length - 1;
-            setResultModal({ passed: true, movesTaken, shortestPath });
+            const score = tierScore('passed', movesTaken, shortestPath);
+            setResultModal({ passed: true, movesTaken, shortestPath, score });
             advanceTimerRef.current = setTimeout(() => {
                 setSolvedAnimating(false);
                 advance();
@@ -236,7 +265,7 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
         if (failed && !solvedAnimationFired.current.has(activeTier)) {
             solvedAnimationFired.current.add(activeTier);
             const shortestPath = activePuzzleSet[activeTier].optimalPath.length - 1;
-            setResultModal({ passed: false, movesTaken: activePuzzle.moveLimit, shortestPath });
+            setResultModal({ passed: false, movesTaken: activePuzzle.moveLimit, shortestPath, score: 0 });
             advanceTimerRef.current = setTimeout(() => {
                 advance();
             }, ADVANCE_DELAY_FAIL);
@@ -252,12 +281,28 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
         };
     }, []);
 
-    // Auto-scroll word chain
+    // Auto-scroll word chain — smooth so the new tile glides into view
     useEffect(() => {
         if (scrollAreaRef.current) {
-            scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
+            scrollAreaRef.current.scrollTo({ top: scrollAreaRef.current.scrollHeight, behavior: 'smooth' });
         }
     }, [moves]);
+
+    // Fetch same-day percentile for each solved tier when summary opens in daily mode.
+    // Requires Phase 3's game_events data in production — returns null if sample < 20.
+    useEffect(() => {
+        if (!showSummary || !isDailyMode) return;
+        const dateStr = new Date().toISOString().split('T')[0]; // UTC date
+        void Promise.all(
+            TIERS.map(async (tier) => {
+                const p = state.puzzles[tier];
+                if (p.status !== 'passed') return [tier, null] as const;
+                const pct = await getDailyPercentile(tier, dateStr, p.moves.length - 1);
+                return [tier, pct] as const;
+            }),
+        ).then((results) => setPercentiles(Object.fromEntries(results)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [showSummary]);
 
     // ── State helpers ─────────────────────────────────────────────────────────
 
@@ -307,6 +352,13 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
 
         const nextMoves = [...moves, guess];
         const nowSolved = guess === activePuzzle.target;
+        const isFirstMove = progress.status === 'not-started';
+        const now = Date.now();
+
+        // Capture tier start time on first move so puzzle_completed can include time_ms.
+        if (isFirstMove) {
+            tierStartTimeRef.current[activeTier] = now;
+        }
 
         // Move limiter disabled — puzzles can only be completed by solving them.
         // Re-enable by restoring the nowFailed / moveLimit check here.
@@ -315,6 +367,32 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
         updateProgress(activeTier, { moves: nextMoves, status: newStatus });
         setInput('');
         setShowHints(false);
+
+        // Fire analytics events fire-and-forget — never block the submit flow.
+        const sid = sessionIdRef.current;
+        if (sid) {
+            if (isFirstMove) {
+                void submitGameEvent('stepladder', sid, 'puzzle_started', activeTier, {
+                    start: activePuzzle.start,
+                    target: activePuzzle.target,
+                    optimal: activePuzzle.optimalPath.length - 1,
+                });
+            }
+            void submitGameEvent('stepladder', sid, 'guess_submitted', activeTier, {
+                word: guess,
+                move_number: nextMoves.length - 1,
+            });
+            if (nowSolved) {
+                const startTime = tierStartTimeRef.current[activeTier];
+                void submitGameEvent('stepladder', sid, 'puzzle_completed', activeTier, {
+                    solved: true,
+                    moves_taken: nextMoves.length - 1,
+                    optimal: activePuzzle.optimalPath.length - 1,
+                    hints_used: progress.hintsUsed,
+                    time_ms: startTime ? now - startTime : null,
+                });
+            }
+        }
 
         // Two-frame approach: let the new tile render first, then add the animation
         // class in the next event loop tick. This mirrors how animate-pop works on
@@ -331,9 +409,43 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
         }
     }
 
-    function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-        if (e.key === 'Enter') submitMove();
+    // Letter append/remove — shared by virtual keyboard and global keydown listener.
+    function appendLetter(ch: string) {
+        if (input.length >= activePuzzle.start.length) return;
+        setInput((prev) => prev + ch);
     }
+
+    function backspace() {
+        setInput((prev) => prev.slice(0, -1));
+    }
+
+    // Called by both StepladderKeyboard ENTER and the global keydown handler.
+    function handleKeyPress(key: string) {
+        if (key === 'ENTER') { submitMove(); return; }
+        if (key === 'BACKSPACE') { backspace(); return; }
+        if (/^[A-Z]$/.test(key)) { appendLetter(key); return; }
+    }
+
+    // Gate: block all game keystrokes while any modal is open.
+    const anyModalOpen = showInstructions || showHints || showNewSetModal || showWordReportModal;
+
+    // Global physical keyboard listener — uses a ref so the closure is never stale.
+    const keydownHandlerRef = useRef<((e: KeyboardEvent) => void) | undefined>(undefined);
+    keydownHandlerRef.current = (e: KeyboardEvent) => {
+        if (anyModalOpen || inputBlocked) return;
+        if (e.metaKey || e.ctrlKey || e.altKey) return;
+        if (e.key === 'Enter') { submitMove(); return; }
+        if (e.key === 'Backspace') { e.preventDefault(); backspace(); return; }
+        if (/^[a-zA-Z]$/.test(e.key)) { appendLetter(e.key.toUpperCase()); return; }
+    };
+
+    useEffect(() => {
+        // Register once; the ref keeps the handler current on every render.
+        const handler = (e: KeyboardEvent) => keydownHandlerRef.current?.(e);
+        window.addEventListener('keydown', handler);
+        return () => window.removeEventListener('keydown', handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     function pickHint(word: string) {
         setInput(word);
@@ -382,11 +494,6 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
         showToast(`"${word}" flagged — thanks!`);
     }
 
-    function handleWordReportKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-        if (e.key === 'Enter') handleMissingWordSubmit();
-        if (e.key === 'Escape') closeWordReportModal();
-    }
-
     // ── New puzzle set flow ───────────────────────────────────────────────────
 
     function handleNewSet() {
@@ -427,17 +534,18 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
 
     function buildShareText(): string {
         const today = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
-        const lines = [`Stepladder — ${today}`];
+        const lines = [`Stepladder — ${today}  ${summaryScore.total}/300`];
         for (const tier of TIERS) {
             const p = state.puzzles[tier];
             const puzzle = activePuzzleSet[tier];
             const shortest = puzzle.optimalPath.length - 1;
             const emoji = TIER_EMOJI[tier];
+            const pts = summaryScore.byTier[tier];
             if (p.status === 'passed') {
                 const taken = p.moves.length - 1;
                 const over = taken - shortest;
-                const resultStr = over === 0 ? `${taken}/${shortest}` : over > 0 ? `${taken}/${shortest} +${over}` : `${taken}/${shortest} ${over}`;
-                lines.push(`${emoji} ${TIER_LABELS[tier].padEnd(7)} ✓ ${resultStr}`);
+                const resultStr = over === 0 ? `${taken}/${shortest}` : `${taken}/${shortest} +${over}`;
+                lines.push(`${emoji} ${TIER_LABELS[tier].padEnd(7)} ✓ ${resultStr}  (${pts} pts)`);
             } else if (p.status === 'failed') {
                 lines.push(`${emoji} ${TIER_LABELS[tier].padEnd(7)} ✗  (shortest: ${shortest})`);
             } else {
@@ -477,39 +585,84 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
 
     // ── Summary screen ────────────────────────────────────────────────────────
 
+    // Compute once — used in both summary JSX and buildShareText.
+    const summaryScore = calculateCumulativeScore(
+        Object.fromEntries(
+            TIERS.map((t) => [t, {
+                status: state.puzzles[t].status,
+                movesTaken: state.puzzles[t].moves.length - 1,
+                optimal: activePuzzleSet[t].optimalPath.length - 1,
+            }]),
+        ) as Parameters<typeof calculateCumulativeScore>[0],
+    );
+
     if (showSummary) {
         return (
             <>
-                {showNewSetModal && renderNewSetModal()}
-                {showWordReportModal && renderWordReportModal()}
+                {showNewSetModal && (
+                    <NewSetModal
+                        puzzleStatuses={{ easy: state.puzzles.easy.status, medium: state.puzzles.medium.status, hard: state.puzzles.hard.status }}
+                        ratings={newSetRatings}
+                        onRatingChange={(tier, rating) => setNewSetRatings((prev) => ({ ...prev, [tier]: rating }))}
+                        onSubmit={submitNewSetFeedback}
+                        onClose={() => setShowNewSetModal(false)}
+                    />
+                )}
+                {showWordReportModal && (
+                    <WordReportModal
+                        stage={wordReportStage}
+                        onStageChange={setWordReportStage}
+                        input={wordReportInput}
+                        onInputChange={setWordReportInput}
+                        onClose={closeWordReportModal}
+                        onSubmitMissing={handleMissingWordSubmit}
+                        onSubmitBad={handleBadWordSubmit}
+                        maxLength={activePuzzle.start.length}
+                    />
+                )}
 
-                <main className="w-full max-w-xl mx-auto px-4 flex flex-col h-dvh sm:h-auto sm:min-h-screen">
-                    <div className="flex-none pt-6 sm:pt-8 pb-4 flex flex-col gap-4">
-                        <div className="flex items-center justify-between">
-                            <div className="flex flex-col gap-0.5">
-                                <h1 className="text-4xl font-bold">Stepladder</h1>
-                                <p className="text-xs opacity-40 tracking-wide">a daily word ladder game</p>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <button
-                                    onClick={() => { setInstructionsPage(1); setShowInstructions(true); }}
-                                    className="border rounded px-2.5 py-1.5 text-sm opacity-70 hover:opacity-100 transition-opacity">
-                                    How to Play
-                                </button>
-                                <ThemeToggle />
-                            </div>
-                        </div>
+                {/* h-[calc(100dvh-3rem)] subtracts the NavBar's h-12 from the mobile viewport budget */}
+                <main className="w-full max-w-xl mx-auto px-4 flex flex-col h-[calc(100dvh-3rem)] sm:min-h-[calc(100vh-3rem)] overflow-hidden">
+                    <div className="flex-none pt-6 sm:pt-8 pb-4">
+                        <GameHeader onHowToPlay={() => setShowInstructions(true)} />
                     </div>
 
                     <div className="flex-1 flex flex-col justify-center gap-6 py-4">
-                        <p className="text-sm opacity-50 uppercase tracking-wide text-center">Today&apos;s set</p>
+                        {/* Score summary */}
+                        {(() => {
+                            const solvedPercentiles = TIERS
+                                .filter((t) => state.puzzles[t].status === 'passed' && percentiles[t] != null)
+                                .map((t) => percentiles[t] as number);
+                            const avgPercentile = solvedPercentiles.length > 0
+                                ? Math.round(solvedPercentiles.reduce((a, b) => a + b, 0) / solvedPercentiles.length)
+                                : null;
+                            return (
+                                <div className="text-center flex flex-col gap-1">
+                                    <p className="text-sm opacity-50 uppercase tracking-wide">Today&apos;s set</p>
+                                    <p className="text-5xl font-bold">{summaryScore.total}</p>
+                                    <p className="text-sm opacity-40">out of 300 pts</p>
+                                    {/* Percentile — only in daily mode, only when sample is large enough */}
+                                    {isDailyMode && avgPercentile !== null && (
+                                        <p className="text-sm opacity-70 mt-1">
+                                            You beat {avgPercentile}% of today&apos;s players
+                                        </p>
+                                    )}
+                                </div>
+                            );
+                        })()}
 
                         <div className="flex flex-col gap-3 border rounded-xl p-5">
                             {TIERS.map((tier) => (
                                 <div key={tier} className="flex items-center gap-3">
                                     <span className="text-xl w-7 text-center">{TIER_EMOJI[tier]}</span>
                                     <span className="font-semibold w-16">{TIER_LABELS[tier]}</span>
-                                    <span className="text-sm opacity-70">{shortestDisplay(tier)}</span>
+                                    <span className="text-sm opacity-70 flex-1">{shortestDisplay(tier)}</span>
+                                    {/* Per-tier score shown for completed tiers */}
+                                    {(state.puzzles[tier].status === 'passed' || state.puzzles[tier].status === 'failed') && (
+                                        <span className="text-sm font-mono opacity-60">
+                                            {summaryScore.byTier[tier]} pts
+                                        </span>
+                                    )}
                                 </div>
                             ))}
                         </div>
@@ -538,21 +691,49 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
                     </div>
                 </main>
 
-                {showInstructions && renderInstructionsModal()}
+                {showInstructions && <InstructionsModal onClose={closeInstructions} />}
             </>
         );
     }
 
     // ── Active puzzle screen ──────────────────────────────────────────────────
 
-    const inputBlocked = solved || failed || atLimit;
-
     return (
         <>
-            {showInstructions && renderInstructionsModal()}
-            {showNewSetModal && renderNewSetModal()}
-            {showWordReportModal && renderWordReportModal()}
-            {resultModal && renderResultModal(resultModal)}
+            {showInstructions && <InstructionsModal onClose={closeInstructions} />}
+            {showNewSetModal && (
+                <NewSetModal
+                    puzzleStatuses={{ easy: state.puzzles.easy.status, medium: state.puzzles.medium.status, hard: state.puzzles.hard.status }}
+                    ratings={newSetRatings}
+                    onRatingChange={(tier, rating) => setNewSetRatings((prev) => ({ ...prev, [tier]: rating }))}
+                    onSubmit={submitNewSetFeedback}
+                    onClose={() => setShowNewSetModal(false)}
+                />
+            )}
+            {showWordReportModal && (
+                <WordReportModal
+                    stage={wordReportStage}
+                    onStageChange={setWordReportStage}
+                    input={wordReportInput}
+                    onInputChange={setWordReportInput}
+                    onClose={closeWordReportModal}
+                    onSubmitMissing={handleMissingWordSubmit}
+                    onSubmitBad={handleBadWordSubmit}
+                    maxLength={activePuzzle.start.length}
+                />
+            )}
+            {resultModal && (
+                <ResultModal
+                    passed={resultModal.passed}
+                    movesTaken={resultModal.movesTaken}
+                    shortestPath={resultModal.shortestPath}
+                    score={resultModal.score}
+                    onNext={() => {
+                        if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
+                        advance();
+                    }}
+                />
+            )}
 
             {/* ── Hints overlay — only closes via X ── */}
             {showHints && (
@@ -588,147 +769,88 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
                 </div>
             )}
 
-            <main className="w-full max-w-xl mx-auto px-4 flex flex-col h-dvh sm:h-auto sm:min-h-screen">
+            {/* h-[calc(100dvh-3rem)] subtracts the NavBar's h-12 from the mobile viewport budget */}
+            <main className="w-full max-w-xl mx-auto px-4 flex flex-col h-[calc(100dvh-3rem)] sm:min-h-[calc(100vh-3rem)] overflow-hidden">
 
                 {/* ── Top: always visible ── */}
                 <div className="flex-none pt-6 sm:pt-8 pb-4 flex flex-col gap-4">
-                    <div className="flex items-center justify-between">
-                        <div className="flex flex-col gap-0.5">
-                            <h1 className="text-4xl font-bold">Stepladder</h1>
-                            <p className="text-xs opacity-40 tracking-wide">a daily word ladder game</p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <button
-                                onClick={() => { setInstructionsPage(1); setShowInstructions(true); }}
-                                className="border rounded px-2.5 py-1.5 text-sm opacity-70 hover:opacity-100 transition-opacity"
-                                title="How to play">
-                                How to Play
-                            </button>
-                            <ThemeToggle />
-                        </div>
-                    </div>
-
-                    <div className="flex items-center justify-center gap-6">
-                        <div className="flex flex-col items-center gap-1">
-                            <span className="text-xs uppercase tracking-widest opacity-40">Start</span>
-                            <span className="text-4xl font-mono font-semibold">{activePuzzle.start}</span>
-                        </div>
-                        <span className="text-lg opacity-30">→</span>
-                        <div className="flex flex-col items-center gap-1">
-                            <span className="text-xs uppercase tracking-widest opacity-40">Target</span>
-                            <span className="text-4xl font-mono font-semibold">{activePuzzle.target}</span>
-                        </div>
-                    </div>
-
-                    {/* Status area — fixed below start/target, does not scroll */}
-                    <div className="flex flex-col gap-0.5 text-center">
-                        <span className="text-xs uppercase tracking-wide opacity-50">
-                            {TIER_EMOJI[activeTier]} Puzzle {TIER_NUMBER[activeTier]} of 3 · {TIER_LABELS[activeTier]}
-                        </span>
-                        <span className="text-sm opacity-60">
-                            Shortest path: {activePuzzle.optimalPath.length - 1} moves
-                        </span>
-                        {message && (
-                            <p className="text-sm text-red-500 dark:text-red-400 mt-1">{message}</p>
-                        )}
-                    </div>
-
+                    <GameHeader onHowToPlay={() => setShowInstructions(true)} />
+                    <GameStatusArea
+                        start={activePuzzle.start}
+                        target={activePuzzle.target}
+                        activeTier={activeTier}
+                        optimalMoves={activePuzzle.optimalPath.length - 1}
+                        message={message}
+                    />
                 </div>
 
-                {/* ── Middle: scrollable word chain ── */}
-                <div
-                    ref={scrollAreaRef}
-                    className="flex-1 overflow-y-auto flex flex-col gap-2 pb-2 sm:flex-none sm:max-h-[35vh]">
-                    {moves.map((move, index) => {
-                        const isLast = index === moves.length - 1;
-                        const isSolvedTile = isLast && solved;
-                        const isFailedTile = isLast && failed;
-                        const isFlashing = index === flashTileIndex && !isSolvedTile;
-                        return (
-                            <div
-                                key={index}
-                                className={[
-                                    'border-2 rounded px-4 py-2 text-lg font-mono transition-colors duration-300',
-                                    isSolvedTile
-                                        ? 'border-green-500 text-green-600 dark:text-green-400'
-                                        : isFailedTile
-                                        ? 'border-red-500 text-red-600 dark:text-red-400'
-                                        : isFlashing
-                                        ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/40 animate-word-pop shadow-md shadow-blue-200 dark:shadow-blue-900'
-                                        : 'border-blue-500',
-                                    isSolvedTile && solvedAnimating ? 'animate-pop' : '',
-                                ].join(' ')}>
-                                {move}
-                                {isSolvedTile && <span className="ml-2 text-base">✓</span>}
-                                {isFailedTile && <span className="ml-2 text-base">✗</span>}
-                            </div>
-                        );
-                    })}
-                </div>
+                {/* ── Middle: scrollable word chain + current guess tile ── */}
+                <GameCardContainer
+                    scrollRef={scrollAreaRef}
+                    moves={moves}
+                    flashTileIndex={flashTileIndex}
+                    solved={solved}
+                    failed={failed}
+                    solvedAnimating={solvedAnimating}
+                    inputBlocked={inputBlocked}
+                    input={input}
+                />
 
-                {/* ── Bottom: always visible controls ── */}
-                <div className="flex-none pt-4 pb-6 sm:pb-8 flex flex-col gap-4">
+                {/* Hint button — centered between card area and keyboard */}
+                {!inputBlocked && (
+                    <div className="flex-none flex justify-center py-2">
+                        <button
+                            onClick={() => {
+                                if (!hintConsumedForWord) {
+                                    updateProgress(activeTier, {
+                                        hintsUsed: Math.min(progress.hintsUsed + 1, 2),
+                                        hintWord: currentWord,
+                                    });
+                                    // Only fire when a charge actually applies — reopening for same word is free.
+                                    const sid = sessionIdRef.current;
+                                    if (sid) {
+                                        void submitGameEvent('stepladder', sid, 'hint_used', activeTier, {
+                                            at_word: currentWord,
+                                            hint_number: progress.hintsUsed + 1,
+                                        });
+                                    }
+                                }
+                                setShowHints((v) => !v);
+                            }}
+                            disabled={progress.hintsUsed >= 2 && !hintConsumedForWord}
+                            className="border rounded px-4 py-1.5 text-sm opacity-60 hover:opacity-100 transition-opacity disabled:opacity-25 disabled:cursor-not-allowed">
+                            Hint ×{Math.max(0, 2 - progress.hintsUsed)}
+                        </button>
+                    </div>
+                )}
+
+                {/* ── Bottom: keyboard + secondary controls ── */}
+                <div className="flex-none pb-4 flex flex-col gap-2">
 
                     {wordReportToast && (
-                        <p className="text-sm opacity-70">{wordReportToast}</p>
+                        <p className="text-sm opacity-70 text-center">{wordReportToast}</p>
                     )}
 
+                    {/* Virtual keyboard — handles both letter input and submit (ENTER) */}
                     {!inputBlocked && (
-                        <>
-                            {/* Mobile-only input */}
-                            <input
-                                value={input}
-                                onChange={(e) => setInput(e.target.value)}
-                                onKeyDown={handleKeyDown}
-                                className="sm:hidden border-2 rounded px-4 py-2 w-full bg-transparent font-mono uppercase text-lg"
-                                placeholder="Next word"
-                                maxLength={activePuzzle.start.length}
-                            />
-                            <div className="flex flex-col gap-4 items-center sm:items-stretch sm:flex-row sm:gap-2">
-                                <input
-                                    value={input}
-                                    onChange={(e) => setInput(e.target.value)}
-                                    onKeyDown={handleKeyDown}
-                                    className="hidden sm:block sm:flex-1 sm:min-w-0 border rounded px-4 py-2 bg-transparent font-mono uppercase sm:text-lg"
-                                    placeholder="Next word"
-                                    maxLength={activePuzzle.start.length}
-                                    autoFocus
-                                />
-                                <button
-                                    onClick={() => submitMove()}
-                                    className="border-2 border-green-500 rounded px-4 py-4 sm:py-2 w-full sm:w-auto sm:shrink-0">
-                                    Submit
-                                </button>
-                                <button
-                                    onClick={() => {
-                                        if (!hintConsumedForWord) {
-                                            updateProgress(activeTier, {
-                                                hintsUsed: Math.min(progress.hintsUsed + 1, 2),
-                                                hintWord: currentWord,
-                                            });
-                                        }
-                                        setShowHints((v) => !v);
-                                    }}
-                                    disabled={progress.hintsUsed >= 2 && !hintConsumedForWord}
-                                    className="border rounded px-4 py-3 sm:py-2 w-4/5 sm:w-auto sm:shrink-0 text-sm opacity-60 hover:opacity-100 transition-opacity disabled:opacity-25 disabled:cursor-not-allowed">
-                                    Hint ×{Math.max(0, 2 - progress.hintsUsed)}
-                                </button>
-                            </div>
-                        </>
+                        <StepladderKeyboard
+                            onKeyPress={handleKeyPress}
+                            disabled={inputBlocked}
+                        />
                     )}
 
                     {/* New puzzle set + Word report; new-set hidden in daily mode. */}
-                    <div className="flex flex-col gap-4 items-center sm:flex-row sm:justify-center">
+                    <div className="flex gap-2 items-center justify-center mt-1">
                         {!isDailyMode && (
                             <button
                                 onClick={handleNewSet}
-                                className="border-2 border-yellow-400 rounded px-3 py-3 sm:py-2 text-sm w-3/5 sm:w-48">
+                                className="border-2 border-yellow-400 rounded px-3 py-2 text-sm">
                                 ↻ New puzzle set
                             </button>
                         )}
                         <button
                             onClick={() => setShowWordReportModal(true)}
-                            className="border-2 border-orange-400 rounded px-3 py-3 sm:py-2 text-sm w-2/5 sm:w-48 opacity-60 hover:opacity-100 transition-opacity">
+                            className="border-2 border-orange-400 rounded px-3 py-2 text-sm opacity-60 hover:opacity-100 transition-opacity">
                             Missing/Report Word
                         </button>
                     </div>
@@ -737,338 +859,4 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
         </>
     );
 
-    // ── Modal renderers (defined as functions to avoid early return issues) ───
-
-    function renderInstructionsModal() {
-        const dots = (
-            <div className="flex items-center justify-center gap-1.5">
-                {([1, 2, 3] as const).map((n) => (
-                    <button
-                        key={n}
-                        onClick={() => setInstructionsPage(n)}
-                        className={`w-1.5 h-1.5 rounded-full transition-all ${instructionsPage === n ? 'bg-current opacity-70 w-3' : 'bg-current opacity-20'}`}
-                    />
-                ))}
-            </div>
-        );
-
-        const pages = {
-            1: (
-                <>
-                    <div className="flex items-start justify-between">
-                        <h2 className="text-lg font-bold">How to Play</h2>
-                        <button onClick={closeInstructions} className="opacity-40 hover:opacity-100 text-lg leading-none px-1 mt-0.5">✕</button>
-                    </div>
-                    <p className="text-sm opacity-70">
-                        Get from the <span className="font-semibold opacity-100">start</span> word to the <span className="font-semibold opacity-100">target</span> word — one letter change at a time.
-                    </p>
-                    <div className="flex flex-col gap-1 p-4 rounded-xl border font-mono text-sm">
-                        <span className="opacity-40 text-xs mb-1 font-sans">COLD → WARM</span>
-                        <span>COLD</span>
-                        <span className="opacity-40 text-xs font-sans">change L → R</span>
-                        <span>CORD</span>
-                        <span className="opacity-40 text-xs font-sans">change C → W</span>
-                        <span>WORD</span>
-                        <span className="opacity-40 text-xs font-sans">change O → A</span>
-                        <span>WARD</span>
-                        <span className="opacity-40 text-xs font-sans">change D → M</span>
-                        <span className="text-green-600 dark:text-green-400">WARM ✓</span>
-                    </div>
-                    {dots}
-                    <button onClick={() => setInstructionsPage(2)} className="border rounded px-4 py-2 text-sm font-semibold w-full">
-                        Next →
-                    </button>
-                </>
-            ),
-            2: (
-                <>
-                    <div className="flex items-start justify-between">
-                        <h2 className="text-lg font-bold">The Rules</h2>
-                        <button onClick={closeInstructions} className="opacity-40 hover:opacity-100 text-lg leading-none px-1 mt-0.5">✕</button>
-                    </div>
-                    <div className="flex flex-col gap-3 text-sm">
-                        <div className="flex gap-3">
-                            <span className="text-green-500 font-bold mt-0.5">①</span>
-                            <p className="opacity-70">Change <span className="font-semibold opacity-100">exactly one letter</span> per move — any position, any letter.</p>
-                        </div>
-                        <div className="flex gap-3">
-                            <span className="text-green-500 font-bold mt-0.5">②</span>
-                            <p className="opacity-70">The result must be a <span className="font-semibold opacity-100">real word</span>.</p>
-                        </div>
-                        <div className="flex gap-3">
-                            <span className="text-green-500 font-bold mt-0.5">③</span>
-                            <p className="opacity-70">Fewer moves is better — try to match the <span className="font-semibold opacity-100">shortest possible path</span>.</p>
-                        </div>
-                    </div>
-                    <div className="flex flex-col gap-2 p-3 rounded-xl border text-sm font-mono">
-                        <div className="flex items-center gap-2"><span className="text-green-500">✓</span><span>COLD → CORD</span><span className="font-sans text-xs opacity-40">(L→R, one change)</span></div>
-                        <div className="flex items-center gap-2"><span className="text-red-500">✗</span><span>COLD → COAT</span><span className="font-sans text-xs opacity-40">(two changes)</span></div>
-                        <div className="flex items-center gap-2"><span className="text-red-500">✗</span><span>COLD → CLOD</span><span className="font-sans text-xs opacity-40">(rearranged)</span></div>
-                    </div>
-                    {dots}
-                    <div className="flex gap-3">
-                        <button onClick={() => setInstructionsPage(1)} className="border rounded px-4 py-2 text-sm w-full opacity-60 hover:opacity-100">← Back</button>
-                        <button onClick={() => setInstructionsPage(3)} className="border rounded px-4 py-2 text-sm font-semibold w-full">Next →</button>
-                    </div>
-                </>
-            ),
-            3: (
-                <>
-                    <div className="flex items-start justify-between">
-                        <h2 className="text-lg font-bold">Daily Set</h2>
-                        <button onClick={closeInstructions} className="opacity-40 hover:opacity-100 text-lg leading-none px-1 mt-0.5">✕</button>
-                    </div>
-                    <p className="text-sm opacity-70">Each day you get <span className="font-semibold opacity-100">three puzzles</span>, getting harder:</p>
-                    <div className="flex flex-col gap-2.5">
-                        <div className="flex items-center gap-3">
-                            <span className="text-xl">🟢</span>
-                            <div>
-                                <p className="text-sm font-semibold">Easy</p>
-                                <p className="text-xs opacity-50">4-move shortest path</p>
-                            </div>
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <span className="text-xl">🟡</span>
-                            <div>
-                                <p className="text-sm font-semibold">Medium</p>
-                                <p className="text-xs opacity-50">5-move shortest path</p>
-                            </div>
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <span className="text-xl">🔴</span>
-                            <div>
-                                <p className="text-sm font-semibold">Hard</p>
-                                <p className="text-xs opacity-50">6+ move shortest path</p>
-                            </div>
-                        </div>
-                    </div>
-                    <p className="text-sm opacity-60">Share your results after finishing all three. You can&apos;t do better than the shortest path — but you can match it.</p>
-                    {dots}
-                    <div className="flex gap-3">
-                        <button onClick={() => setInstructionsPage(2)} className="border rounded px-4 py-2 text-sm w-full opacity-60 hover:opacity-100">← Back</button>
-                        <button onClick={closeInstructions} className="border-2 border-green-500 rounded px-4 py-2 text-sm font-semibold w-full">Let&apos;s play →</button>
-                    </div>
-                </>
-            ),
-        };
-
-        return (
-            <div
-                className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-                onClick={closeInstructions}>
-                <div
-                    className="bg-[var(--background)] border rounded-2xl p-6 max-w-sm w-full mx-4 flex flex-col gap-5"
-                    onClick={(e) => e.stopPropagation()}>
-                    {pages[instructionsPage]}
-                </div>
-            </div>
-        );
-    }
-
-    function renderResultModal(modal: { passed: boolean; movesTaken: number; shortestPath: number }) {
-        const over = modal.movesTaken - modal.shortestPath;
-        const resultLine = modal.passed
-            ? over === 0
-                ? `${modal.movesTaken} moves — matched the shortest path!`
-                : `${modal.movesTaken} moves (shortest path: ${modal.shortestPath}, +${over})`
-            : `Shortest path: ${modal.shortestPath} moves`;
-
-        return (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-                <div className="bg-[var(--background)] border rounded-2xl p-8 w-full max-w-sm mx-4 flex flex-col items-center gap-5">
-                    <span className={`text-5xl ${modal.passed ? 'text-green-500' : 'text-red-500'}`}>
-                        {modal.passed ? '✓' : '✗'}
-                    </span>
-                    <div className="text-center flex flex-col gap-1">
-                        <p className="text-lg font-bold">{modal.passed ? 'Solved!' : 'Out of moves'}</p>
-                        <p className="text-sm opacity-60">{resultLine}</p>
-                    </div>
-
-                    {/* Draining progress bar */}
-                    <div className="w-full h-1 bg-black/10 dark:bg-white/10 rounded overflow-hidden">
-                        <div className={`h-full rounded ${modal.passed ? 'bg-green-500 animate-drain-pass' : 'bg-red-500 animate-drain-fail'}`} />
-                    </div>
-
-                    <button
-                        onClick={() => {
-                            if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
-                            advance();
-                        }}
-                        className="text-sm opacity-50 hover:opacity-100 transition-opacity">
-                        Next →
-                    </button>
-                </div>
-            </div>
-        );
-    }
-
-    function renderNewSetModal() {
-        const anyCompleted = TIERS.some(
-            (t) => state.puzzles[t].status === 'passed' || state.puzzles[t].status === 'failed',
-        );
-
-        return (
-            <div
-                className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-                onClick={() => setShowNewSetModal(false)}>
-                <div
-                    className="bg-[var(--background)] border rounded-lg p-6 w-full max-w-sm mx-4 flex flex-col gap-5"
-                    onClick={(e) => e.stopPropagation()}>
-                    <div className="flex items-start justify-between">
-                        <div>
-                            <h2 className="text-lg font-bold">New puzzle set?</h2>
-                            <p className="text-sm opacity-60 mt-1">
-                                {anyCompleted ? 'Rate the puzzles you played — or skip.' : 'Your progress will be lost.'}
-                            </p>
-                        </div>
-                        <button
-                            onClick={() => setShowNewSetModal(false)}
-                            className="opacity-40 hover:opacity-100 text-lg leading-none px-1 ml-2 mt-0.5">
-                            ✕
-                        </button>
-                    </div>
-
-                    {anyCompleted && (
-                        <div className="flex flex-col gap-3">
-                            {TIERS.map((tier) => {
-                                const status = state.puzzles[tier].status;
-                                const isComplete = status === 'passed' || status === 'failed';
-                                return (
-                                    <div key={tier} className="flex items-center justify-between">
-                                        <span className="text-sm font-medium flex items-center gap-2">
-                                            <span>{TIER_EMOJI[tier]}</span>
-                                            <span>{TIER_LABELS[tier]}</span>
-                                        </span>
-                                        {isComplete ? (
-                                            <div className="flex gap-2">
-                                                {(['good', 'bad'] as FeedbackRating[]).map((rating) => (
-                                                    <button
-                                                        key={rating}
-                                                        onClick={() =>
-                                                            setNewSetRatings((prev) => ({
-                                                                ...prev,
-                                                                [tier]: prev[tier] === rating ? undefined : rating,
-                                                            }))
-                                                        }
-                                                        className={[
-                                                            'border rounded-lg px-3 py-2 text-lg transition-all',
-                                                            newSetRatings[tier] === rating
-                                                                ? rating === 'good'
-                                                                    ? 'border-green-500 bg-green-500/10'
-                                                                    : 'border-red-500 bg-red-500/10'
-                                                                : 'opacity-40 hover:opacity-70',
-                                                        ].join(' ')}>
-                                                        {rating === 'good' ? '👍' : '👎'}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        ) : (
-                                            <span className="text-xs opacity-30 italic">not played</span>
-                                        )}
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    )}
-
-                    <div className="flex gap-3 pt-1">
-                        <button
-                            onClick={() => setShowNewSetModal(false)}
-                            className="text-sm opacity-40 hover:opacity-70 transition-opacity flex-1 py-2 text-center">
-                            Cancel
-                        </button>
-                        <button
-                            onClick={() => submitNewSetFeedback(!anyCompleted)}
-                            className="border-2 border-yellow-400 rounded px-4 py-2 text-sm font-semibold flex-1">
-                            {anyCompleted ? 'Submit & continue' : 'Continue'}
-                        </button>
-                    </div>
-                </div>
-            </div>
-        );
-    }
-
-    function renderWordReportModal() {
-        return (
-            <div
-                className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40"
-                onClick={closeWordReportModal}>
-                <div
-                    className="bg-[var(--background)] border border-b-0 sm:border rounded-t-2xl sm:rounded-lg p-6 pb-10 sm:pb-6 w-full sm:max-w-sm sm:mx-4 flex flex-col gap-5"
-                    onClick={(e) => e.stopPropagation()}>
-                    {wordReportStage === 'idle' && (
-                        <>
-                            <div className="flex items-center justify-between">
-                                <h2 className="text-lg font-bold">Report a word</h2>
-                                <button onClick={closeWordReportModal} className="opacity-50 hover:opacity-100 text-lg leading-none px-1">✕</button>
-                            </div>
-                            <div className="flex flex-col gap-3">
-                                <button
-                                    onClick={() => setWordReportStage('missing')}
-                                    className="border rounded-xl px-4 py-4 text-sm font-semibold w-full text-left flex flex-col gap-0.5 active:opacity-70">
-                                    <span>+ Missing word</span>
-                                    <span className="font-normal opacity-50">A word that should be in the game</span>
-                                </button>
-                                <button
-                                    onClick={() => setWordReportStage('bad')}
-                                    className="border rounded-xl px-4 py-4 text-sm font-semibold w-full text-left flex flex-col gap-0.5 active:opacity-70">
-                                    <span>− Report word</span>
-                                    <span className="font-normal opacity-50">A word that should not be in the game</span>
-                                </button>
-                            </div>
-                        </>
-                    )}
-
-                    {wordReportStage === 'missing' && (
-                        <>
-                            <div className="flex items-center justify-between">
-                                <h2 className="text-lg font-bold">Missing word</h2>
-                                <button onClick={closeWordReportModal} className="opacity-50 hover:opacity-100 text-lg leading-none px-1">✕</button>
-                            </div>
-                            <p className="text-sm opacity-60">What word did you expect to work?</p>
-                            <div className="flex gap-2">
-                                <input
-                                    autoFocus
-                                    value={wordReportInput}
-                                    onChange={(e) => setWordReportInput(e.target.value)}
-                                    onKeyDown={handleWordReportKeyDown}
-                                    className="border rounded px-3 py-3 flex-1 bg-transparent font-mono uppercase text-base"
-                                    placeholder="WORD"
-                                    maxLength={activePuzzle.start.length}
-                                />
-                                <button onClick={handleMissingWordSubmit} className="border rounded px-4 py-3 text-sm font-semibold">Submit</button>
-                            </div>
-                            <button onClick={() => setWordReportStage('idle')} className="text-sm opacity-40 hover:opacity-70 transition-opacity text-center w-full py-1">← Back</button>
-                        </>
-                    )}
-
-                    {wordReportStage === 'bad' && (
-                        <>
-                            <div className="flex items-center justify-between">
-                                <h2 className="text-lg font-bold">Wrong word</h2>
-                                <button onClick={closeWordReportModal} className="opacity-50 hover:opacity-100 text-lg leading-none px-1">✕</button>
-                            </div>
-                            <p className="text-sm opacity-60">Which word felt wrong?</p>
-                            <div className="flex gap-2">
-                                <input
-                                    autoFocus
-                                    value={wordReportInput}
-                                    onChange={(e) => setWordReportInput(e.target.value)}
-                                    onKeyDown={(e) => {
-                                        if (e.key === 'Enter') handleBadWordSubmit();
-                                        if (e.key === 'Escape') closeWordReportModal();
-                                    }}
-                                    className="border rounded px-3 py-3 flex-1 bg-transparent font-mono uppercase text-base"
-                                    placeholder="WORD"
-                                    maxLength={activePuzzle.start.length}
-                                />
-                                <button onClick={handleBadWordSubmit} className="border rounded px-4 py-3 text-sm font-semibold">Submit</button>
-                            </div>
-                            <button onClick={() => setWordReportStage('idle')} className="text-sm opacity-40 hover:opacity-70 transition-opacity text-center w-full py-1">← Back</button>
-                        </>
-                    )}
-                </div>
-            </div>
-        );
-    }
 }
