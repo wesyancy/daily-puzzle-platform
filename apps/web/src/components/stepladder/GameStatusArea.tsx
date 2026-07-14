@@ -33,9 +33,10 @@ export function GameStatusArea({ start, target, activeTier, optimalMoves, messag
                 <span className="text-sm opacity-60">
                     Shortest path: {optimalMoves} moves
                 </span>
-                {message && (
-                    <p className="text-sm text-red-500 dark:text-red-400 mt-1">{message}</p>
-                )}
+                {/* Always rendered so the layout height never shifts when a message appears/disappears */}
+                <p className={`text-sm mt-1 ${message ? 'text-red-500 dark:text-red-400' : 'invisible'}`}>
+                    {message || ' '}
+                </p>
             </div>
         </>
     );
