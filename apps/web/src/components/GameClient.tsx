@@ -2,10 +2,11 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { submitFeedback, submitWordReport, submitGameEvent } from '@/app/actions';
+import { submitFeedback, submitWordReport, submitGameEvent, getDailyPercentile } from '@/app/actions';
 import type { PuzzleSet, Tier, TieredPuzzle } from '@/lib/generatePuzzle';
 import { getSessionId } from '@repo/analytics';
 import { StepladderKeyboard } from '@/components/stepladder/StepladderKeyboard';
+import { tierScore, calculateCumulativeScore } from '@/lib/calculateCumulativeScore';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -137,7 +138,7 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
     const solvedAnimationFired = useRef<Set<Tier>>(new Set());
 
     // Result modal (shown immediately on pass/fail, auto-dismisses when advance fires)
-    type ResultModal = { passed: boolean; movesTaken: number; shortestPath: number };
+    type ResultModal = { passed: boolean; movesTaken: number; shortestPath: number; score: number };
     const [resultModal, setResultModal] = useState<ResultModal | null>(null);
 
     // Hint tracking: derived from persisted progress — survives refresh correctly.
@@ -146,6 +147,10 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
     // Scroll + clipboard
     const scrollAreaRef = useRef<HTMLDivElement>(null);
     const [shareCopied, setShareCopied] = useState(false);
+
+    // Percentile comparison — fetched when summary opens in daily mode.
+    // null means "not yet fetched or insufficient data"; undefined means "not started".
+    const [percentiles, setPercentiles] = useState<Partial<Record<Tier, number | null>>>({});
 
     // Flash animation: tracks the index of the most recently played word tile
     const [flashTileIndex, setFlashTileIndex] = useState(-1);
@@ -244,7 +249,8 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
             setSolvedAnimating(true);
             const movesTaken = state.puzzles[activeTier].moves.length - 1;
             const shortestPath = activePuzzleSet[activeTier].optimalPath.length - 1;
-            setResultModal({ passed: true, movesTaken, shortestPath });
+            const score = tierScore('passed', movesTaken, shortestPath);
+            setResultModal({ passed: true, movesTaken, shortestPath, score });
             advanceTimerRef.current = setTimeout(() => {
                 setSolvedAnimating(false);
                 advance();
@@ -257,7 +263,7 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
         if (failed && !solvedAnimationFired.current.has(activeTier)) {
             solvedAnimationFired.current.add(activeTier);
             const shortestPath = activePuzzleSet[activeTier].optimalPath.length - 1;
-            setResultModal({ passed: false, movesTaken: activePuzzle.moveLimit, shortestPath });
+            setResultModal({ passed: false, movesTaken: activePuzzle.moveLimit, shortestPath, score: 0 });
             advanceTimerRef.current = setTimeout(() => {
                 advance();
             }, ADVANCE_DELAY_FAIL);
@@ -279,6 +285,22 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
             scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
         }
     }, [moves]);
+
+    // Fetch same-day percentile for each solved tier when summary opens in daily mode.
+    // Requires Phase 3's game_events data in production — returns null if sample < 20.
+    useEffect(() => {
+        if (!showSummary || !isDailyMode) return;
+        const dateStr = new Date().toISOString().split('T')[0]; // UTC date
+        void Promise.all(
+            TIERS.map(async (tier) => {
+                const p = state.puzzles[tier];
+                if (p.status !== 'passed') return [tier, null] as const;
+                const pct = await getDailyPercentile(tier, dateStr, p.moves.length - 1);
+                return [tier, pct] as const;
+            }),
+        ).then((results) => setPercentiles(Object.fromEntries(results)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [showSummary]);
 
     // ── State helpers ─────────────────────────────────────────────────────────
 
@@ -515,17 +537,18 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
 
     function buildShareText(): string {
         const today = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
-        const lines = [`Stepladder — ${today}`];
+        const lines = [`Stepladder — ${today}  ${summaryScore.total}/300`];
         for (const tier of TIERS) {
             const p = state.puzzles[tier];
             const puzzle = activePuzzleSet[tier];
             const shortest = puzzle.optimalPath.length - 1;
             const emoji = TIER_EMOJI[tier];
+            const pts = summaryScore.byTier[tier];
             if (p.status === 'passed') {
                 const taken = p.moves.length - 1;
                 const over = taken - shortest;
-                const resultStr = over === 0 ? `${taken}/${shortest}` : over > 0 ? `${taken}/${shortest} +${over}` : `${taken}/${shortest} ${over}`;
-                lines.push(`${emoji} ${TIER_LABELS[tier].padEnd(7)} ✓ ${resultStr}`);
+                const resultStr = over === 0 ? `${taken}/${shortest}` : `${taken}/${shortest} +${over}`;
+                lines.push(`${emoji} ${TIER_LABELS[tier].padEnd(7)} ✓ ${resultStr}  (${pts} pts)`);
             } else if (p.status === 'failed') {
                 lines.push(`${emoji} ${TIER_LABELS[tier].padEnd(7)} ✗  (shortest: ${shortest})`);
             } else {
@@ -565,6 +588,17 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
 
     // ── Summary screen ────────────────────────────────────────────────────────
 
+    // Compute once — used in both summary JSX and buildShareText.
+    const summaryScore = calculateCumulativeScore(
+        Object.fromEntries(
+            TIERS.map((t) => [t, {
+                status: state.puzzles[t].status,
+                movesTaken: state.puzzles[t].moves.length - 1,
+                optimal: activePuzzleSet[t].optimalPath.length - 1,
+            }]),
+        ) as Parameters<typeof calculateCumulativeScore>[0],
+    );
+
     if (showSummary) {
         return (
             <>
@@ -590,14 +624,41 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
                     </div>
 
                     <div className="flex-1 flex flex-col justify-center gap-6 py-4">
-                        <p className="text-sm opacity-50 uppercase tracking-wide text-center">Today&apos;s set</p>
+                        {/* Score summary */}
+                        {(() => {
+                            const solvedPercentiles = TIERS
+                                .filter((t) => state.puzzles[t].status === 'passed' && percentiles[t] != null)
+                                .map((t) => percentiles[t] as number);
+                            const avgPercentile = solvedPercentiles.length > 0
+                                ? Math.round(solvedPercentiles.reduce((a, b) => a + b, 0) / solvedPercentiles.length)
+                                : null;
+                            return (
+                                <div className="text-center flex flex-col gap-1">
+                                    <p className="text-sm opacity-50 uppercase tracking-wide">Today&apos;s set</p>
+                                    <p className="text-5xl font-bold">{summaryScore.total}</p>
+                                    <p className="text-sm opacity-40">out of 300 pts</p>
+                                    {/* Percentile — only in daily mode, only when sample is large enough */}
+                                    {isDailyMode && avgPercentile !== null && (
+                                        <p className="text-sm opacity-70 mt-1">
+                                            You beat {avgPercentile}% of today&apos;s players
+                                        </p>
+                                    )}
+                                </div>
+                            );
+                        })()}
 
                         <div className="flex flex-col gap-3 border rounded-xl p-5">
                             {TIERS.map((tier) => (
                                 <div key={tier} className="flex items-center gap-3">
                                     <span className="text-xl w-7 text-center">{TIER_EMOJI[tier]}</span>
                                     <span className="font-semibold w-16">{TIER_LABELS[tier]}</span>
-                                    <span className="text-sm opacity-70">{shortestDisplay(tier)}</span>
+                                    <span className="text-sm opacity-70 flex-1">{shortestDisplay(tier)}</span>
+                                    {/* Per-tier score shown for completed tiers */}
+                                    {(state.puzzles[tier].status === 'passed' || state.puzzles[tier].status === 'failed') && (
+                                        <span className="text-sm font-mono opacity-60">
+                                            {summaryScore.byTier[tier]} pts
+                                        </span>
+                                    )}
                                 </div>
                             ))}
                         </div>
@@ -950,7 +1011,7 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
         );
     }
 
-    function renderResultModal(modal: { passed: boolean; movesTaken: number; shortestPath: number }) {
+    function renderResultModal(modal: { passed: boolean; movesTaken: number; shortestPath: number; score: number }) {
         const over = modal.movesTaken - modal.shortestPath;
         const resultLine = modal.passed
             ? over === 0
@@ -967,6 +1028,10 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
                     <div className="text-center flex flex-col gap-1">
                         <p className="text-lg font-bold">{modal.passed ? 'Solved!' : 'Out of moves'}</p>
                         <p className="text-sm opacity-60">{resultLine}</p>
+                        {/* Tier score — always shown so players learn the formula */}
+                        <p className={`text-2xl font-bold mt-1 ${modal.passed ? 'text-green-500' : 'text-red-400 opacity-60'}`}>
+                            {modal.passed ? `+${modal.score} pts` : '0 pts'}
+                        </p>
                     </div>
 
                     {/* Draining progress bar */}
