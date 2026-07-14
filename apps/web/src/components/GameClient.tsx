@@ -796,47 +796,47 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
                     input={input}
                 />
 
+                {/* Hint button — centered between card area and keyboard */}
+                {!inputBlocked && (
+                    <div className="flex-none flex justify-center py-2">
+                        <button
+                            onClick={() => {
+                                if (!hintConsumedForWord) {
+                                    updateProgress(activeTier, {
+                                        hintsUsed: Math.min(progress.hintsUsed + 1, 2),
+                                        hintWord: currentWord,
+                                    });
+                                    // Only fire when a charge actually applies — reopening for same word is free.
+                                    const sid = sessionIdRef.current;
+                                    if (sid) {
+                                        void submitGameEvent('stepladder', sid, 'hint_used', activeTier, {
+                                            at_word: currentWord,
+                                            hint_number: progress.hintsUsed + 1,
+                                        });
+                                    }
+                                }
+                                setShowHints((v) => !v);
+                            }}
+                            disabled={progress.hintsUsed >= 2 && !hintConsumedForWord}
+                            className="border rounded px-4 py-1.5 text-sm opacity-60 hover:opacity-100 transition-opacity disabled:opacity-25 disabled:cursor-not-allowed">
+                            Hint ×{Math.max(0, 2 - progress.hintsUsed)}
+                        </button>
+                    </div>
+                )}
+
                 {/* ── Bottom: keyboard + secondary controls ── */}
-                <div className="flex-none pt-2 pb-4 flex flex-col gap-2">
+                <div className="flex-none pb-4 flex flex-col gap-2">
 
                     {wordReportToast && (
                         <p className="text-sm opacity-70 text-center">{wordReportToast}</p>
                     )}
 
+                    {/* Virtual keyboard — handles both letter input and submit (ENTER) */}
                     {!inputBlocked && (
-                        <>
-                            {/* Hint button — sits above the keyboard */}
-                            <div className="flex justify-end">
-                                <button
-                                    onClick={() => {
-                                        if (!hintConsumedForWord) {
-                                            updateProgress(activeTier, {
-                                                hintsUsed: Math.min(progress.hintsUsed + 1, 2),
-                                                hintWord: currentWord,
-                                            });
-                                            // Only fire when a charge actually applies — reopening for same word is free.
-                                            const sid = sessionIdRef.current;
-                                            if (sid) {
-                                                void submitGameEvent('stepladder', sid, 'hint_used', activeTier, {
-                                                    at_word: currentWord,
-                                                    hint_number: progress.hintsUsed + 1,
-                                                });
-                                            }
-                                        }
-                                        setShowHints((v) => !v);
-                                    }}
-                                    disabled={progress.hintsUsed >= 2 && !hintConsumedForWord}
-                                    className="border rounded px-4 py-1.5 text-sm opacity-60 hover:opacity-100 transition-opacity disabled:opacity-25 disabled:cursor-not-allowed">
-                                    Hint ×{Math.max(0, 2 - progress.hintsUsed)}
-                                </button>
-                            </div>
-
-                            {/* Virtual keyboard — handles both letter input and submit (ENTER) */}
-                            <StepladderKeyboard
-                                onKeyPress={handleKeyPress}
-                                disabled={inputBlocked}
-                            />
-                        </>
+                        <StepladderKeyboard
+                            onKeyPress={handleKeyPress}
+                            disabled={inputBlocked}
+                        />
                     )}
 
                     {/* New puzzle set + Word report; new-set hidden in daily mode. */}
