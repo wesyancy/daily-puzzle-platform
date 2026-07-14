@@ -281,10 +281,10 @@ export default function GameClient({ puzzleSet, isDailyMode }: { puzzleSet: Puzz
         };
     }, []);
 
-    // Auto-scroll word chain
+    // Auto-scroll word chain — smooth so the new tile glides into view
     useEffect(() => {
         if (scrollAreaRef.current) {
-            scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
+            scrollAreaRef.current.scrollTo({ top: scrollAreaRef.current.scrollHeight, behavior: 'smooth' });
         }
     }, [moves]);
 
