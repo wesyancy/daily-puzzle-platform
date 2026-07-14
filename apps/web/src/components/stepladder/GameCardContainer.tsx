@@ -22,8 +22,8 @@ export function GameCardContainer({
             className="flex-1 overflow-y-auto flex flex-col gap-2 pt-2 pb-2 sm:flex-none sm:max-h-[35vh]"
             style={{
                 // Fade edges so content softly disappears when the list is taller than the container
-                maskImage: 'linear-gradient(to bottom, transparent, black 0.75rem, black calc(100% - 0.75rem), transparent)',
-                WebkitMaskImage: 'linear-gradient(to bottom, transparent, black 0.75rem, black calc(100% - 0.75rem), transparent)',
+                maskImage: 'linear-gradient(to bottom, transparent, black 2rem, black calc(100% - 2rem), transparent)',
+                WebkitMaskImage: 'linear-gradient(to bottom, transparent, black 2rem, black calc(100% - 2rem), transparent)',
             }}>
             {moves.map((move, index) => {
                 const isLast = index === moves.length - 1;
