@@ -20,8 +20,17 @@ export function StepladderKeyboard({ onKeyPress, disabled }: Props) {
             {ROWS.map((row, rowIdx) => (
                 <div key={rowIdx} className="flex justify-center gap-1">
                     {row.map((key) => {
-                        const isAction = key === 'ENTER' || key === '⌫';
-                        const emittedKey = key === '⌫' ? 'BACKSPACE' : key;
+                        const isEnter = key === 'ENTER';
+                        const isDelete = key === '⌫';
+                        const emittedKey = isDelete ? 'BACKSPACE' : key;
+
+                        // Action keys get colored outlines; letter keys keep the neutral style.
+                        const colorClasses = isEnter
+                            ? 'bg-green-50 dark:bg-green-950/40 border-2 border-green-500 text-green-700 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/50'
+                            : isDelete
+                            ? 'bg-red-50 dark:bg-red-950/40 border-2 border-red-500 text-red-700 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50'
+                            : 'bg-gray-200 dark:bg-neutral-600 border border-black/10 dark:border-white/10 hover:bg-gray-300 dark:hover:bg-neutral-500';
+
                         return (
                             <button
                                 key={key}
@@ -30,14 +39,12 @@ export function StepladderKeyboard({ onKeyPress, disabled }: Props) {
                                 // flex-[1.5] makes action keys 50% wider than letter keys
                                 className={[
                                     'h-12 rounded font-semibold text-sm uppercase',
-                                    'bg-gray-200 dark:bg-neutral-600',
-                                    'hover:bg-gray-300 dark:hover:bg-neutral-500',
-                                    'border border-black/10 dark:border-white/10',
                                     'transition-colors active:scale-95',
                                     'disabled:opacity-30 disabled:cursor-not-allowed',
-                                    isAction ? 'flex-[1.5] text-xs px-1' : 'flex-1',
+                                    (isEnter || isDelete) ? 'flex-[1.5] text-xs px-1' : 'flex-1',
+                                    colorClasses,
                                 ].join(' ')}
-                                aria-label={key === '⌫' ? 'Backspace' : key}>
+                                aria-label={isDelete ? 'Backspace' : key}>
                                 {key}
                             </button>
                         );

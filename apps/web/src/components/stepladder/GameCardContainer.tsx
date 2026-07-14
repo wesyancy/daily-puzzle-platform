@@ -124,10 +124,11 @@ export function GameCardContainer({
                 );
             })}
 
-            {/* Current guess tile — dashed border, lives below the submitted chain */}
+            {/* Current guess tile — dashed lighter-blue border matches submitted tile height
+                via   placeholder (same metrics as alphabetic text, no min-h hack needed) */}
             {!inputBlocked && (
-                <div className="border-2 border-dashed border-blue-400 rounded px-4 py-2 text-lg font-mono min-h-[2.75rem] text-blue-500 dark:text-blue-400">
-                    {input.toUpperCase() || <span className="opacity-0">·</span>}
+                <div className="border-2 border-dashed border-blue-300 dark:border-blue-600 rounded px-4 py-2 text-lg font-mono text-blue-500 dark:text-blue-400">
+                    {input.toUpperCase() || ' '}
                 </div>
             )}
         </div>
